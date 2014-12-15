@@ -16,13 +16,13 @@ OVS needs a system with 1GB hugepages support.
 Building and Installing:
 ------------------------
 
-Required DPDK 1.7
+Required DPDK 1.8 release candidate 4
 
 1. Configure build & install DPDK:
   1. Set `$DPDK_DIR`
 
      ```
-     export DPDK_DIR=/usr/src/dpdk-1.7.1
+     export DPDK_DIR=/usr/src/dpdk-1.8.0-rc4
      cd $DPDK_DIR
      ```
 
