@@ -50,7 +50,7 @@ static inline void dpif_packet_delete(struct dpif_packet *p)
 static inline uint32_t dpif_packet_get_dp_hash(struct dpif_packet *p)
 {
 #ifdef DPDK_NETDEV
-    return p->ofpbuf.mbuf.pkt.hash.rss;
+    return p->ofpbuf.mbuf.hash.rss;
 #else
     return p->dp_hash;
 #endif
@@ -60,7 +60,7 @@ static inline void dpif_packet_set_dp_hash(struct dpif_packet *p,
                                            uint32_t hash)
 {
 #ifdef DPDK_NETDEV
-    p->ofpbuf.mbuf.pkt.hash.rss = hash;
+    p->ofpbuf.mbuf.hash.rss = hash;
 #else
     p->dp_hash = hash;
 #endif

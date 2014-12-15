@@ -28,6 +28,9 @@
 #include <unistd.h>
 #include <stdio.h>
 
+#include <rte_config.h>
+#include <rte_mbuf.h>
+
 #include "dpif-netdev.h"
 #include "list.h"
 #include "netdev-dpdk.h"
@@ -265,13 +268,12 @@ __rte_pktmbuf_init(struct rte_mempool *mp,
     m->buf_len = (uint16_t)buf_len;
 
     /* keep some headroom between start of buffer and data */
-    m->pkt.data = (char*) m->buf_addr + RTE_MIN(RTE_PKTMBUF_HEADROOM, m->buf_len);
+    m->data_off = RTE_MIN(RTE_PKTMBUF_HEADROOM, m->buf_len);
 
     /* init some constant fields */
-    m->type = RTE_MBUF_PKT;
     m->pool = mp;
-    m->pkt.nb_segs = 1;
-    m->pkt.in_port = 0xff;
+    m->nb_segs = 1;
+    m->port = 0xff;
 }
 
 static void
@@ -825,7 +827,8 @@ dpdk_do_tx_copy(struct netdev *netdev, int qid, struct dpif_packet ** pkts,
         }
 
         /* We have to do a copy for now */
-        memcpy(mbufs[newcnt]->pkt.data, ofpbuf_data(&pkts[i]->ofpbuf), size);
+        memcpy(rte_pktmbuf_mtod(mbufs[newcnt], char *),
+               ofpbuf_data(&pkts[i]->ofpbuf), size);
 
         rte_pktmbuf_data_len(mbufs[newcnt]) = size;
         rte_pktmbuf_pkt_len(mbufs[newcnt]) = size;

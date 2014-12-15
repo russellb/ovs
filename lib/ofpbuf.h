@@ -19,6 +19,11 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#ifdef DPDK_NETDEV
+#include <rte_common.h>
+#endif
+
 #include "list.h"
 #include "packets.h"
 #include "util.h"
@@ -386,12 +391,18 @@ BUILD_ASSERT_DECL(offsetof(struct ofpbuf, mbuf) == 0);
 
 static inline void * ofpbuf_data(const struct ofpbuf *b)
 {
-    return b->mbuf.pkt.data;
+    return rte_pktmbuf_mtod(&(b->mbuf), void *);
 }
 
 static inline void ofpbuf_set_data(struct ofpbuf *b, void *d)
 {
-    b->mbuf.pkt.data = d;
+    if (d == NULL) {
+        /* NULL 'd' value is valid */
+        b->mbuf.data_off = 0;
+    } else {
+        /* Work out the offset between the start of segment buffer and 'd' */
+        b->mbuf.data_off = RTE_PTR_DIFF(d, b->mbuf.buf_addr);
+    }
 }
 
 static inline void * ofpbuf_base(const struct ofpbuf *b)
@@ -406,14 +417,14 @@ static inline void ofpbuf_set_base(struct ofpbuf *b, void *d)
 
 static inline uint32_t ofpbuf_size(const struct ofpbuf *b)
 {
-    return b->mbuf.pkt.pkt_len;
+    return b->mbuf.pkt_len;
 }
 
 static inline void ofpbuf_set_size(struct ofpbuf *b, uint32_t v)
 {
-    b->mbuf.pkt.data_len = v;    /* Current seg length. */
-    b->mbuf.pkt.pkt_len = v;     /* Total length of all segments linked to
-                                  * this segment. */
+    b->mbuf.data_len = v;    /* Current seg length. */
+    b->mbuf.pkt_len = v;     /* Total length of all segments linked to
+                              * this segment. */
 }
 
 #else
