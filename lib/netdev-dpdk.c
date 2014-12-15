@@ -1270,22 +1270,6 @@ dpdk_common_init(void)
     ovs_thread_create("dpdk_watchdog", dpdk_watchdog, NULL);
 }
 
-static int
-dpdk_class_init(void)
-{
-    int result;
-
-    result = rte_eal_pci_probe();
-    if (result) {
-        VLOG_ERR("Cannot probe PCI");
-        return -result;
-    }
-
-    VLOG_INFO("Ethernet Device Count: %d", (int)rte_eth_dev_count());
-
-    return 0;
-}
-
 /* Client Rings */
 
 static int
@@ -1510,7 +1494,7 @@ dpdk_init(int argc, char **argv)
 const struct netdev_class dpdk_class =
     NETDEV_DPDK_CLASS(
         "dpdk",
-        dpdk_class_init,
+        NULL,
         netdev_dpdk_construct,
         netdev_dpdk_set_multiq,
         netdev_dpdk_eth_send);
