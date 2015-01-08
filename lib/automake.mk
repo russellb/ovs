@@ -336,6 +336,7 @@ lib_libopenvswitch_la_SOURCES += \
 endif
 
 if DPDK_NETDEV
+lib_libopenvswitch_la_LDFLAGS += -lfuse
 lib_libopenvswitch_la_SOURCES += \
        lib/netdev-dpdk.c \
        lib/netdev-dpdk.h

@@ -17,6 +17,7 @@ Building and Installing:
 ------------------------
 
 Required DPDK 1.8 release candidate 4
+Optional `fuse`, `fuse-devel`
 
 1. Configure build & install DPDK:
   1. Set `$DPDK_DIR`
@@ -289,6 +290,241 @@ https://01.org/packet-processing/downloads
 A general rule of thumb for better performance is that the client
 application should not be assigned the same dpdk core mask "-c" as
 the vswitchd.
+
+DPDK vHost:
+-----------
+
+Prerequisites:
+1.  DPDK 1.8 with vHost support enabled and recompile OVS as above.
+
+     Update `config/common_linuxapp` so that DPDK is built with vHost
+     libraries:
+
+     `CONFIG_RTE_LIBRTE_VHOST=y`
+
+2.  Insert the Fuse module:
+
+      `modprobe fuse`
+
+3.  Build and insert the `eventfd_link` module:
+
+     `cd $DPDK_DIR/lib/librte_vhost/eventfd_link/`
+     `make`
+     `insmod $DPDK_DIR/lib/librte_vhost/eventfd_link.ko`
+
+4.  Remove /dev/vhost-net character device:
+
+      `rm -rf /dev/vhost-net`
+
+Following the steps above to create a bridge, you can now add DPDK vHost
+as a port to the vswitch.
+
+`ovs-vsctl add-port br0 dpdkvhost0 -- set Interface dpdkvhost0 type=dpdkvhost`
+
+Unlike DPDK ring ports, DPDK vHost ports can have arbitrary names:
+
+`ovs-vsctl add-port br0 port123ABC -- set Interface port123ABC type=dpdkvhost`
+
+However, please note that when attaching userspace devices to QEMU, the
+name provided during the add-port operation must match the ifname parameter
+on the QEMU command line.
+
+DPDK vHost VM configuration:
+----------------------------
+
+1. Configure virtio-net adaptors:
+   The guest must be configured with virtio-net adapters and offloads
+   MUST BE DISABLED. This means the following parameters should be passed
+   to the QEMU binary:
+
+     ```
+     -netdev tap,id=<id>,script=no,downscript=no,ifname=<name>,vhost=on
+     -device virtio-net-pci,netdev=net1,mac=<mac>,csum=off,gso=off,
+     guest_tso4=off,guest_tso6=off,guest_ecn=off
+     ```
+
+     Repeat the above parameters for multiple devices.
+
+2. Configure huge pages:
+   QEMU must allocate the VM's memory on hugetlbfs. Vhost ports access a
+   virtio-net device's virtual rings and packet buffers mapping the VM's
+   physical memory on hugetlbfs. To enable vhost-ports to map the VM's
+   memory into their process address space, pass the following paramters
+   to QEMU:
+
+     `-mem-path /dev/hugepages -mem-prealloc`
+
+DPDK vHost with standard vHost:
+-------------------------------
+
+DPDK vHost ports use a Linux* character device to communicate with QEMU.
+By default it is set to `/dev/vhost-net`. This conflicts with the kernel
+vHost device, hence the need to remove `/dev/vhost-net` above. However,
+if you wish to use kernel vhost in parallel, you can specify an
+alternative basename on the vswitchd command line like so:
+
+     `./vswitchd/ovs-vswitchd --dpdk --basename my-vhost-net -c 0x1 ...`
+
+Note that the basename arguement and associated string must be the first
+arguements after `--dpdk` and come before the EAL arguements.
+
+DPDK vHost VM configuration with standard vHost:
+------------------------------------------------
+
+1. As with the "normal" (i.e. using `/dev/vhost-net`) DPDK vHost setup,
+the guest must be configured with virtio-net adapters and offloads
+MUST BE DISABLED. However, this time you must also pass in a `vhostfd`
+argument:
+
+     ```
+     -netdev tap,id=<id>,script=no,downscript=no,ifname=<name>,vhost=on,
+     vhostfd=<open_fd>
+     -device virtio-net-pci,netdev=net1,mac=<mac>,csum=off,gso=off,
+     guest_tso4=off,guest_tso6=off,guest_ecn=off
+     ```
+
+     The open file descriptor must be passed to QEMU running as a child
+     process.
+
+2. As above, QEMU must allocate the VM's memory on hugetlbfs:
+
+     `-mem-path /dev/hugepages -mem-prealloc`
+
+3. (Optional) If you are using libvirt, you must enable libvirt to access
+the userspace device file by adding it to controllers cgroup for libvirtd
+using the following steps:
+
+     1. In `/etc/libvirt/qemu.conf` add/edit the following lines:
+
+        ```
+        1) cgroup_controllers = [ ... "devices", ... ]
+        2) clear_emulator_capabilities = 0
+        3) user = "root"
+        4) group = "root"
+        5) cgroup_device_acl = [
+               "/dev/null", "/dev/full", "/dev/zero",
+               "/dev/random", "/dev/urandom",
+               "/dev/ptmx", "/dev/kvm", "/dev/kqemu",
+               "/dev/rtc", "/dev/hpet", "/dev/net/tun",
+               "/dev/<devbase-name>-<index>",
+               "/dev/hugepages"]
+        ```
+
+     2. Disable SELinux or set to permissive mode
+     3. Mount cgroup device controller:
+
+        ```
+        mkdir /dev/cgroup
+        mount -t cgroup none /dev/cgroup -o devices
+        ```
+
+     4. Restart the libvirtd process
+        For example, on Fedora:
+
+          `systemctl restart libvirtd.service`
+
+The easiest way to setup a Guest that isn't using `/dev/vhost-net` is to
+use the `qemu-wrap.py` script located in utilities. This Python script
+automates the requirements specified above and can be used in conjunction
+with libvirt.
+
+DPDK vHost VM configuration with QEMU wrapper:
+----------------------------------------------
+
+The QEMU wrapper script automatically detects and calls QEMU with the
+necessary parameters required to integrate with the vhost sample code.
+It performs the following actions:
+
+  * Automatically detects the location of the hugetlbfs and inserts this
+    into the command line parameters.
+  * Automatically open file descriptors for each virtio-net device and
+    inserts this into the command line parameters.
+  * Disables offloads on each virtio-net device.
+  * Calls QEMU passing both the command line parameters passed to the
+    script itself and those it has auto-detected.
+
+Before use, you **must** edit the configuration parameters section of the
+script to point to the correct emulator location and set any additional
+options. Of these settings, `emul_path` and `us_vhost_path` **must** be
+set. All other parameters are optional.
+
+To use directly from the command line simply pass the wrapper some of the
+QEMU parameters: it will configure the rest. For example:
+
+```
+qemu-wrap.py -cpu host -boot c -hda <disk image> -m 4096 -smp 4
+  --enable-kvm -nographic -vnc none -net none -netdev tap,id=net1,
+  script=no,downscript=no,ifname=if1,vhost=on -device virtio-net-pci,
+  netdev=net1,mac=00:00:00:00:00:01
+```
+
+To use with libvirt, follow these steps:
+
+1. Place `qemu-wrap.py` in libvirtd's binary search PATH ($PATH)
+   Ideally in the same directory that the QEMU binary is located.
+
+2. Ensure that the script has the same owner/group and file permissions as the
+   QEMU binary.
+
+3. Update the VM xml file using "virsh edit VM.xml"
+
+     1. Set the VM to use the launch script
+        Set the emulator path contained in the `<emulator><emulator/>` tags.
+        For example, replace:
+
+          `<emulator>/usr/bin/qemu-kvm<emulator/>`
+
+          with:
+
+          `<emulator>/usr/bin/qemu-wrap.py<emulator/>`
+
+     2. Set the VM's devices to use vhost-net offload
+        ```
+        <interface type='network'>
+          <mac address='xx:xx:xx:xx:xx:xx'/>
+          <source network='default'/>
+          <model type='virtio'/>
+          <driver name='vhost'/>
+          <address type=.../>
+        </interface>
+        ```
+
+     4. Enable libvirt to access our userpace device file by adding it
+     to controllers cgroup for libvirtd as specified above.
+
+     5. (Optional) Set `hugetlbfs_mount` variable
+        VMs using userspace vhost must use hugepage backed memory. This
+        can be enabled in the libvirt XML config by adding a memory
+        backing section to the XML config:
+
+          ```
+          <memoryBacking>
+          <hugepages/>
+          </memoryBacking>
+          ```
+
+          This memory backing section should be added after the `<memory>`
+          and `<currentMemory>` sections. This will add the `-mem-prealloc`
+          and `-mem-path <path>` flags to the QEMU command line. The
+          `hugetlbfs_mount` variable can be used to override the default
+          `<path>` passed through by libvirt.
+
+          If `-mem-prealloc` or `-mem-path <path>` are not passed through
+          and a vhost device is detected then these options will be
+          automatically added by this script. This script will detect the
+          system hugetlbfs mount point to be used for `<path>`. The default
+          `<path>` for this script can be overidden by the `hugetlbfs_dir`
+          variable in the configuration section of this script.
+
+4. Restart the libvirtd system process
+   For example on Fedora:
+
+     `systemctl restart libvirtd.service`
+
+5. Edit the Configuration Parameters section of the script to point to
+the correct emulator location and set any additional options.
+
+6. Use virt-manager to launch the VM
 
 Restrictions:
 -------------
