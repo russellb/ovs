@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manpage program="ovn-nbctl" section="8" title="ovn-nbctl">
+    <h1>Name</h1>
+    <p>ovn-nbctl -- Open Virtual Network northbound db management utility</p>
+
+    <h1>Synopsys</h1>
+    <p>ovn-nbctl [OPTIONS] COMMAND [ARG...]</p>
+
+    <h1>Description</h1>
+    <p>This utility can be used to manage the OVN northbound database.</p>
+
+    <h1>Logical Switch Commands</h1>
+    <p>lswitch-add [name]</p>
+    <p>lswitch-del &lt;lswitch&gt;</p>
+    <p>lswitch-list</p>
+    <p>lswitch-set-external-id &lt;lswitch&gt; &lt;key&gt; [value]</p>
+    <p>lswitch-get-external-id &lt;lswitch&gt; [key]</p>
+
+    <h1>Logical Port Commands</h1>
+    <p>lport-add &lt;name&gt; &lt;lswitch&gt;</p>
+    <p>lport-del &lt;lport&gt;</p>
+    <p>lport-list &lt;lswitch&gt;</p>
+    <p>lport-set-external-id &lt;lport&gt; &lt;key&gt; [value]</p>
+    <p>lport-get-external-id &lt;lport&gt; [key]</p>
+    <p>lport-set-macs &lt;lport&gt; [MAC] [MAC] [...]</p>
+    <p>lport-get-macs &lt;lport&gt;</p>
+
+    <h1>Options</h1>
+    <p>-d DATABASE | --database DATABASE</p>
+    <p>-h | --help</p>
+    <p>-o | --options</p>
+    <p>-V | --version</p>
+
+    <h1>Logging options</h1>
+    <p>-vSPEC, --verbose=SPEC</p>
+    <p>-v, --verbose</p>
+    <p>--log-file[=FILE]</p>
+    <p>--syslog-target=HOST:PORT</p>
+
+    <h1>PKI configuration (required to use SSL)</h1>
+    <p>-p, --private-key=FILE  file with private key</p>
+    <p>-c, --certificate=FILE  file with certificate for private key</p>
+    <p>-C, --ca-cert=FILE      file with peer CA certificate</p>
+
+</manpage>
