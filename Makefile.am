@@ -379,3 +379,4 @@ include datapath-windows/automake.mk
 include datapath-windows/include/automake.mk
 include ovn/automake.mk
 include ovn/controller/automake.mk
+include ovn/northbound/automake.mk

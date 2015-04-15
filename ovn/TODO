@@ -2,7 +2,7 @@
 
   ovn-controller is the primary user of flow match expressions, but
   the same syntax and I imagine the same code ought to be useful in
-  ovn-nbd for ACL match expressions.
+  ovn-northbound for ACL match expressions.
 
 ** Definition of data structures to represent a match expression as a
    syntax tree.
@@ -148,7 +148,7 @@
 
     Can probably get this from Open_vSwitch database.
 
-* ovn-nbd
+* ovn-northbound
 
 ** Monitor OVN_Northbound database, trigger Pipeline recomputation on change.
 
@@ -264,7 +264,7 @@
 
    No details yet.
 
-** Init scripts for ovn-controller (on HVs), ovn-nbd, OVN DB server.
+** Init scripts for ovn-controller (on HVs), ovn-northbound, OVN DB server.
 
 ** Distribution packaging.
 
