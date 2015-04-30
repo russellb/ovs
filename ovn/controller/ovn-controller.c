@@ -42,6 +42,7 @@
 #include "ofctrl.h"
 #include "bindings.h"
 #include "chassis.h"
+#include "physical.h"
 #include "pipeline.h"
 
 VLOG_DEFINE_THIS_MODULE(main);
@@ -184,6 +185,7 @@ main(int argc, char *argv[])
 
     chassis_init(&ctx);
     bindings_init(&ctx);
+    physical_init(&ctx);
 
     get_initial_snapshot(ctx.ovs_idl);
 
@@ -226,9 +228,12 @@ main(int argc, char *argv[])
             break;
         }
 
+        ofctrl_clear_flows();
+
         chassis_run(&ctx);
         bindings_run(&ctx);
         pipeline_run(&ctx);
+        physical_run(&ctx);
         ofctrl_run(&ctx);
         unixctl_server_run(unixctl);
 
