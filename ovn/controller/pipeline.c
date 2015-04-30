@@ -41,24 +41,21 @@ symtab_init(void)
     /* Reserve a pair of registers for the logical inport and outport.  A full
      * 32-bit register each is bigger than we need, but the expression code
      * doesn't yet support string fields that occupy less than a full OXM. */
-    expr_symtab_add_string(&symtab, "inport", MFF_REG6, NULL);
-    expr_symtab_add_string(&symtab, "outport", MFF_REG7, NULL);
+    expr_symtab_add_string(&symtab, "inport", MFF_LOG_INPORT, NULL);
+    expr_symtab_add_string(&symtab, "outport", MFF_LOG_OUTPORT, NULL);
 
-    /* Registers.  We omit the registers that would otherwise overlap 'inport'
-     * and 'outport'. */
-    expr_symtab_add_field(&symtab, "xreg0", MFF_XREG0, NULL, false);
-    expr_symtab_add_field(&symtab, "xreg1", MFF_XREG1, NULL, false);
-    expr_symtab_add_field(&symtab, "xreg2", MFF_XREG2, NULL, false);
+    /* Registers.  We omit the registers that would otherwise overlap the
+     * reserved fields. */
+    for (enum mf_field_id id = MFF_REG0; id < MFF_REG0 + FLOW_N_REGS; id++) {
+        if (id != MFF_LOG_INPORT && id != MFF_LOG_OUTPORT) {
+            char name[8];
 
-    expr_symtab_add_subfield(&symtab, "reg0", NULL, "xreg0[32..63]");
-    expr_symtab_add_subfield(&symtab, "reg1", NULL, "xreg0[0..31]");
-    expr_symtab_add_subfield(&symtab, "reg2", NULL, "xreg1[32..63]");
-    expr_symtab_add_subfield(&symtab, "reg3", NULL, "xreg1[0..31]");
-    expr_symtab_add_subfield(&symtab, "reg4", NULL, "xreg2[32..63]");
-    expr_symtab_add_subfield(&symtab, "reg5", NULL, "xreg2[0..31]");
+            snprintf(name, sizeof name, "reg%d", id - MFF_REG0);
+            expr_symtab_add_field(&symtab, name, id, NULL, false);
+        }
+    }
 
     /* Data fields. */
-
     expr_symtab_add_field(&symtab, "eth.src", MFF_ETH_SRC, NULL, false);
     expr_symtab_add_field(&symtab, "eth.dst", MFF_ETH_DST, NULL, false);
     expr_symtab_add_field(&symtab, "eth.type", MFF_ETH_TYPE, NULL, true);

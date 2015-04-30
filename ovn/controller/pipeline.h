@@ -19,6 +19,10 @@
 
 struct controller_ctx;
 
+/* Logical ports. */
+#define MFF_LOG_INPORT  MFF_REG6 /* Logical input port. */
+#define MFF_LOG_OUTPORT MFF_REG7 /* Logical output port. */
+
 void pipeline_init(struct controller_ctx *);
 void pipeline_run(struct controller_ctx *);
 void pipeline_destroy(struct controller_ctx *);
