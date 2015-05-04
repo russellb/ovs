@@ -40,6 +40,7 @@
 #include "ovn-controller.h"
 #include "bindings.h"
 #include "chassis.h"
+#include "pipeline.h"
 
 VLOG_DEFINE_THIS_MODULE(main);
 
@@ -186,6 +187,7 @@ main(int argc, char *argv[])
 
     ctx.ovnsb_idl = ovsdb_idl_create(ovnsb_remote, &sbrec_idl_class,
                                      true, true);
+    pipeline_init(&ctx);
 
     get_initial_snapshot(ctx.ovnsb_idl);
 
@@ -222,6 +224,7 @@ main(int argc, char *argv[])
 
         chassis_run(&ctx);
         bindings_run(&ctx);
+        pipeline_run(&ctx);
         unixctl_server_run(unixctl);
 
         unixctl_server_wait(unixctl);
@@ -235,6 +238,7 @@ main(int argc, char *argv[])
     }
 
     unixctl_server_destroy(unixctl);
+    pipeline_destroy(&ctx);
     bindings_destroy(&ctx);
     chassis_destroy(&ctx);
 
