@@ -48,6 +48,7 @@
             "columns": {
                 "logical_datapath": {"type": "uuid"},
                 "logical_port": {"type": "string"},
+                "enabled": {"type": {"key": "boolean", "min": 0, "max": 1}},
                 "tunnel_key": {
                      "type": {"key": {"type": "integer",
                                       "minInteger": 1,

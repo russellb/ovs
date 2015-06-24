@@ -235,12 +235,6 @@ build_port_security(const char *eth_addr_field,
     }
 }
 
-static bool
-lport_is_enabled(const struct nbrec_logical_port *lport)
-{
-    return !lport->enabled || *lport->enabled;
-}
-
 /* Updates the Pipeline table in the OVN_SB database, constructing its contents
  * based on the OVN_NB database. */
 static void
@@ -289,8 +283,7 @@ build_pipeline(struct northd_context *ctx)
         build_port_security("eth.src",
                             lport->port_security, lport->n_port_security,
                             &match);
-        pipeline_add(&pc, lport->lswitch, 0, 50, ds_cstr(&match),
-                     lport_is_enabled(lport) ? "next;" : "drop;");
+        pipeline_add(&pc, lport->lswitch, 0, 50, ds_cstr(&match), "next;");
         ds_destroy(&match);
     }
 
@@ -301,11 +294,9 @@ build_pipeline(struct northd_context *ctx)
 
         ds_init(&actions);
         NBREC_LOGICAL_PORT_FOR_EACH (lport, ctx->ovnnb_idl) {
-            if (lport->lswitch == lswitch && lport_is_enabled(lport)) {
-                ds_put_cstr(&actions, "outport = ");
-                json_string_escape(lport->name, &actions);
-                ds_put_cstr(&actions, "; next; ");
-            }
+            ds_put_cstr(&actions, "outport = ");
+            json_string_escape(lport->name, &actions);
+            ds_put_cstr(&actions, "; next; ");
         }
         ds_chomp(&actions, ' ');
 
@@ -410,8 +401,7 @@ build_pipeline(struct northd_context *ctx)
                             lport->port_security, lport->n_port_security,
                             &match);
 
-        pipeline_add(&pc, lport->lswitch, 3, 50, ds_cstr(&match),
-                     lport_is_enabled(lport) ? "output;" : "drop;");
+        pipeline_add(&pc, lport->lswitch, 3, 50, ds_cstr(&match), "output;");
 
         ds_destroy(&match);
     }
@@ -494,6 +484,8 @@ choose_tunnel_key(const struct hmap *tk_hmap)
     return 0;
 }
 
+#define IS_ENABLED(x) (!(x)->enabled || *(x)->enabled)
+
 /*
  * When a change has occurred in the OVN_Northbound database, we go through and
  * make sure that the contents of the Binding table in the OVN_Southbound
@@ -572,6 +564,9 @@ set_bindings(struct northd_context *ctx)
                 sbrec_binding_set_logical_datapath(binding,
                                                     logical_datapath);
             }
+            if (IS_ENABLED(binding) != IS_ENABLED(lport)) {
+                sbrec_binding_set_enabled(binding, lport->enabled, lport->n_enabled);
+            }
         } else {
             /* There is no binding for this logical port, so create one. */
 
@@ -591,6 +586,8 @@ set_bindings(struct northd_context *ctx)
 
             sbrec_binding_set_tunnel_key(binding, tunnel_key);
             sbrec_binding_set_logical_datapath(binding, logical_datapath);
+
+            sbrec_binding_set_enabled(binding, lport->enabled, lport->n_enabled);
 
             /* Add the tunnel key to the tk_hmap so that we don't try to use it
              * for another port.  (We don't want it in the lp_hmap because that
@@ -817,6 +814,8 @@ main(int argc, char *argv[])
     ovsdb_idl_add_column(ovnsb_idl, &sbrec_binding_col_parent_port);
     ovsdb_idl_add_column(ovnsb_idl, &sbrec_binding_col_logical_datapath);
     ovsdb_idl_add_column(ovnsb_idl, &sbrec_binding_col_tunnel_key);
+    ovsdb_idl_add_column(ovnsb_idl, &sbrec_binding_col_enabled);
+    ovsdb_idl_omit_alert(ovnsb_idl, &sbrec_binding_col_enabled);
     ovsdb_idl_add_column(ovnsb_idl, &sbrec_pipeline_col_logical_datapath);
     ovsdb_idl_omit_alert(ovnsb_idl, &sbrec_pipeline_col_logical_datapath);
     ovsdb_idl_add_column(ovnsb_idl, &sbrec_pipeline_col_table_id);
