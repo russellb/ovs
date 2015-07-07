@@ -71,6 +71,18 @@ get_initial_snapshot(struct ovsdb_idl *idl)
 }
 
 static const struct ovsrec_bridge *
+get_bridge(struct ovsdb_idl *ovs_idl, const char *br_name)
+{
+    const struct ovsrec_bridge *br;
+    OVSREC_BRIDGE_FOR_EACH (br, ovs_idl) {
+        if (!strcmp(br->name, br_name)) {
+            return br;
+        }
+    }
+    return NULL;
+}
+
+static const struct ovsrec_bridge *
 get_br_int(struct ovsdb_idl *ovs_idl)
 {
     const struct ovsrec_open_vswitch *cfg = ovsrec_open_vswitch_first(ovs_idl);
@@ -84,10 +96,9 @@ get_br_int(struct ovsdb_idl *ovs_idl)
     }
 
     const struct ovsrec_bridge *br;
-    OVSREC_BRIDGE_FOR_EACH (br, ovs_idl) {
-        if (!strcmp(br->name, br_int_name)) {
-            return br;
-        }
+    br = get_bridge(ovs_idl, br_int_name);
+    if (br) {
+        return br;
     }
 
     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
@@ -100,6 +111,209 @@ get_chassis_id(const struct ovsdb_idl *ovs_idl)
 {
     const struct ovsrec_open_vswitch *cfg = ovsrec_open_vswitch_first(ovs_idl);
     return cfg ? smap_get(&cfg->external_ids, "system-id") : NULL;
+}
+
+/*
+ * Return true if the port is a patch port to a given bridge
+ */
+static bool
+match_patch_port(const struct ovsrec_port *port, const struct ovsrec_bridge *to_br)
+{
+    struct ovsrec_interface *iface;
+    size_t i;
+
+    for (i = 0; i < port->n_interfaces; i++) {
+        const char *peer;
+        iface = port->interfaces[i];
+        if (strcmp(iface->type, "patch")) {
+            continue;
+        }
+        peer = smap_get(&iface->options, "peer");
+        if (peer && !strcmp(peer, to_br->name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void
+create_patch_port(struct controller_ctx *ctx,
+                  const char *network,
+                  const struct ovsrec_bridge *b1,
+                  const struct ovsrec_bridge *b2)
+{
+    struct ovsrec_interface *iface;
+    struct ovsrec_port *port, **ports;
+    size_t i;
+    char *port_name;
+
+    port_name = xasprintf("patch-%s-to-%s", b1->name, b2->name);
+
+    ovsdb_idl_txn_add_comment(ctx->ovs_idl_txn,
+            "ovn-controller: creating patch port '%s' from '%s' to '%s'",
+            port_name, b1->name, b2->name);
+
+    iface = ovsrec_interface_insert(ctx->ovs_idl_txn);
+    ovsrec_interface_set_name(iface, port_name);
+    ovsrec_interface_set_type(iface, "patch");
+    struct smap options = SMAP_INITIALIZER(&options);
+    smap_add(&options, "peer", b2->name);
+    ovsrec_interface_set_options(iface, &options);
+    smap_destroy(&options);
+
+    port = ovsrec_port_insert(ctx->ovs_idl_txn);
+    ovsrec_port_set_name(port, port_name);
+    ovsrec_port_set_interfaces(port, &iface, 1);
+    struct smap ext_ids = SMAP_INITIALIZER(&ext_ids);
+    smap_add(&ext_ids, "ovn-patch-port", network);
+    ovsrec_port_set_external_ids(port, &ext_ids);
+    smap_destroy(&ext_ids);
+
+    ports = xmalloc(sizeof *port * (b1->n_ports + 1));
+    for (i = 0; i < b1->n_ports; i++) {
+        ports[i] = b1->ports[i];
+    }
+    ports[i] = port;
+    ovsrec_bridge_verify_ports(b1);
+    ovsrec_bridge_set_ports(b1, ports, b1->n_ports + 1);
+
+    free(ports);
+    free(port_name);
+}
+
+static void
+create_patch_ports(struct controller_ctx *ctx,
+                   const char *network,
+                   struct shash *existing_ports,
+                   const struct ovsrec_bridge *b1,
+                   const struct ovsrec_bridge *b2)
+{
+    size_t i;
+
+    for (i = 0; i < b1->n_ports; i++) {
+        if (match_patch_port(b1->ports[i], b2)) {
+            /* Patch port already exists on b1 */
+            shash_find_and_delete(existing_ports, b1->ports[i]->name);
+            break;
+        }
+    }
+    if (i == b1->n_ports) {
+        create_patch_port(ctx, network, b1, b2);
+    }
+}
+
+static void
+init_existing_ports(struct controller_ctx *ctx,
+                    struct shash *existing_ports)
+{
+    const struct ovsrec_port *port;
+
+    OVSREC_PORT_FOR_EACH (port, ctx->ovs_idl) {
+        if (!smap_get(&port->external_ids, "ovn-patch-port")) {
+            continue;
+        }
+        shash_add(existing_ports, port->name, port);
+    }
+}
+
+static void
+remove_port(struct controller_ctx *ctx,
+            const struct ovsrec_port *port)
+{
+    const struct ovsrec_bridge *bridge;
+
+    /* We know the port we want to delete, but we have to find the bridge its on
+     * to do so.  Note this only runs on a config change that should be pretty
+     * rare. */
+    OVSREC_BRIDGE_FOR_EACH (bridge, ctx->ovs_idl) {
+        size_t i;
+        for (i = 0; i < bridge->n_ports; i++) {
+            if (bridge->ports[i] != port) {
+                continue;
+            }
+            struct ovsrec_port **new_ports;
+            new_ports = xmemdup(bridge->ports,
+                    sizeof *new_ports * bridge->n_ports);
+            new_ports[i] = new_ports[bridge->n_ports - 1];
+            ovsrec_bridge_verify_ports(bridge);
+            ovsrec_bridge_set_ports(bridge, new_ports, bridge->n_ports - 1);
+            free(new_ports);
+            ovsrec_port_delete(port);
+            return;
+        }
+    }
+}
+
+static void
+parse_bridge_mappings(struct controller_ctx *ctx,
+                      const struct ovsrec_bridge *br_int,
+                      const char *mappings_cfg,
+                      struct smap *bridge_mappings)
+{
+    struct shash existing_ports = SHASH_INITIALIZER(&existing_ports);
+    init_existing_ports(ctx, &existing_ports);
+
+    char *cur, *next, *start;
+    next = start = xstrdup(mappings_cfg);
+    while ((cur = strsep(&next, ","))) {
+        char *network, *bridge = cur;
+        const struct ovsrec_bridge *ovs_bridge;
+
+        network = strsep(&bridge, ":");
+        if (!bridge || !*network || !*bridge) {
+            VLOG_ERR("Invalid ovn-bridge-mappings configuration: '%s'",
+                    mappings_cfg);
+            break;
+        }
+
+        VLOG_DBG("Bridge mapping - network name '%s' to bridge '%s'",
+                network, bridge);
+
+        ovs_bridge = get_bridge(ctx->ovs_idl, bridge);
+        if (!ovs_bridge) {
+            VLOG_WARN("Bridge '%s' not found for network '%s'",
+                    bridge, network);
+            continue;
+        }
+
+        create_patch_ports(ctx, network, &existing_ports, br_int, ovs_bridge);
+        create_patch_ports(ctx, network, &existing_ports, ovs_bridge, br_int);
+
+        smap_add(bridge_mappings, bridge, network);
+    }
+    free(start);
+
+    /* Any ports left in existing_ports are related to configuration that has
+     * been removed, so we should delete the ports now. */
+    struct shash_node *port_node, *port_next_node;
+    SHASH_FOR_EACH_SAFE (port_node, port_next_node, &existing_ports) {
+        struct ovsrec_port *port = port_node->data;
+        shash_delete(&existing_ports, port_node);
+        remove_port(ctx, port);
+    }
+    shash_destroy(&existing_ports);
+}
+
+static void
+init_bridge_mappings(struct controller_ctx *ctx,
+                     const struct ovsrec_bridge *br_int,
+                     struct smap *bridge_mappings)
+{
+    const struct ovsrec_open_vswitch *cfg;
+    cfg = ovsrec_open_vswitch_first(ctx->ovs_idl);
+    if (!cfg) {
+        VLOG_ERR("No Open_vSwitch row defined.");
+        return;
+    }
+
+    const char *mappings_cfg;
+    mappings_cfg = smap_get(&cfg->external_ids, "ovn-bridge-mappings");
+    if (!mappings_cfg) {
+        return;
+    }
+
+    parse_bridge_mappings(ctx, br_int, mappings_cfg, bridge_mappings);
 }
 
 /* Retrieves the OVN Southbound remote location from the
@@ -245,6 +459,16 @@ main(int argc, char *argv[])
     ctx.ovs_idl = ovsdb_idl_create(ovs_remote, &ovsrec_idl_class, false, true);
     ovsdb_idl_add_table(ctx.ovs_idl, &ovsrec_table_open_vswitch);
     ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_open_vswitch_col_external_ids);
+    ovsdb_idl_add_table(ctx.ovs_idl, &ovsrec_table_interface);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_interface_col_name);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_interface_col_type);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_interface_col_options);
+    ovsdb_idl_add_table(ctx.ovs_idl, &ovsrec_table_port);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_port_col_name);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_port_col_interfaces);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_port_col_external_ids);
+    ovsdb_idl_add_table(ctx.ovs_idl, &ovsrec_table_bridge);
+    ovsdb_idl_add_column(ctx.ovs_idl, &ovsrec_bridge_col_ports);
     chassis_register_ovs_idl(ctx.ovs_idl);
     encaps_register_ovs_idl(ctx.ovs_idl);
     binding_register_ovs_idl(ctx.ovs_idl);
@@ -271,6 +495,10 @@ main(int argc, char *argv[])
         const struct ovsrec_bridge *br_int = get_br_int(ctx.ovs_idl);
         const char *chassis_id = get_chassis_id(ctx.ovs_idl);
 
+        /* Map bridges to local nets from ovn-bridge-mappings */
+        struct smap bridge_mappings = SMAP_INITIALIZER(&bridge_mappings);
+        init_bridge_mappings(&ctx, br_int, &bridge_mappings);
+
         if (chassis_id) {
             chassis_run(&ctx, chassis_id);
             encaps_run(&ctx, br_int, chassis_id);
@@ -286,6 +514,8 @@ main(int argc, char *argv[])
             ofctrl_run(br_int, &flow_table);
             hmap_destroy(&flow_table);
         }
+
+        smap_destroy(&bridge_mappings);
 
         unixctl_server_run(unixctl);
 

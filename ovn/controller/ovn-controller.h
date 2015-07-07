@@ -19,6 +19,8 @@
 
 #include "ovn/lib/ovn-sb-idl.h"
 
+struct smap;
+
 struct controller_ctx {
     struct ovsdb_idl *ovnsb_idl;
     struct ovsdb_idl_txn *ovnsb_idl_txn;
