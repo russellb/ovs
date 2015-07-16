@@ -28,9 +28,11 @@ struct controller_ctx;
 struct hmap;
 struct ovsdb_idl;
 struct ovsrec_bridge;
+struct smap;
 
 void physical_register_ovs_idl(struct ovsdb_idl *);
 void physical_run(struct controller_ctx *, const struct ovsrec_bridge *br_int,
-                  const char *chassis_id, struct hmap *flow_table);
+                  const char *chassis_id, struct smap *bridge_mappings,
+                  struct hmap *flow_table);
 
 #endif /* ovn/physical.h */

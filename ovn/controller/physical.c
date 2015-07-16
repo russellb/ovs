@@ -22,8 +22,17 @@
 #include "ovn-controller.h"
 #include "ovn/lib/ovn-sb-idl.h"
 #include "pipeline.h"
+#include "shash.h"
 #include "simap.h"
+#include "smap.h"
 #include "vswitch-idl.h"
+
+/* A register of bit flags for OVN */
+#define MFF_OVN_FLAGS MFF_REG5
+enum {
+    /* Indicates that the packet came in on a localnet port */
+    OVN_FLAG_LOCALNET = (1 << 0),
+};
 
 void
 physical_register_ovs_idl(struct ovsdb_idl *ovs_idl)
@@ -42,12 +51,25 @@ physical_register_ovs_idl(struct ovsdb_idl *ovs_idl)
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_external_ids);
 }
 
+static void
+init_input_match(struct match *match, ofp_port_t ofport, int tag)
+{
+    match_init_catchall(match);
+    match_set_in_port(match, ofport);
+    if (tag) {
+        match_set_dl_vlan(match, htons(tag));
+    }
+}
+
 void
 physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
-             const char *this_chassis_id, struct hmap *flow_table)
+             const char *this_chassis_id, struct smap *bridge_mappings,
+             struct hmap *flow_table)
 {
     struct simap lport_to_ofport = SIMAP_INITIALIZER(&lport_to_ofport);
     struct simap chassis_to_ofport = SIMAP_INITIALIZER(&chassis_to_ofport);
+    struct simap localnet_to_ofport = SIMAP_INITIALIZER(&localnet_to_ofport);
+
     for (int i = 0; i < br_int->n_ports; i++) {
         const struct ovsrec_port *port_rec = br_int->ports[i];
         if (!strcmp(port_rec->name, br_int->name)) {
@@ -72,8 +94,17 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
                 continue;
             }
 
-            /* Record as chassis or local logical port. */
-            if (chassis_id) {
+            /* Record as patch to local net, chassis, or local logical port. */
+            if (!strcmp(iface_rec->type, "patch")) {
+                const char *peer = smap_get(&iface_rec->options, "peer");
+                if (!peer) {
+                    continue;
+                }
+                const char *localnet = smap_get(bridge_mappings, peer);
+                if (localnet) {
+                    simap_put(&localnet_to_ofport, localnet, ofport);
+                }
+            } else if (chassis_id) {
                 simap_put(&chassis_to_ofport, chassis_id, ofport);
                 break;
             } else {
@@ -89,6 +120,13 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
     struct ofpbuf ofpacts;
     ofpbuf_init(&ofpacts, 0);
 
+    struct localnet_flow {
+        struct shash_node node;
+        struct match match;
+        struct ofpbuf ofpacts;
+    };
+    struct shash localnet_inputs = SHASH_INITIALIZER(&localnet_inputs);
+
     /* Set up flows in table 0 for physical-to-logical translation and in table
      * 64 for logical-to-physical translation. */
     const struct sbrec_binding *binding;
@@ -100,10 +138,15 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
          * (and set 'local' to true). When 'parent_port' is set for a binding,
          * it implies a container sitting inside a VM reachable via a 'tag'.
          */
-
         int tag = 0;
         ofp_port_t ofport;
-        if (binding->parent_port) {
+        if (!strcmp(binding->type, "localnet")) {
+            const char *network = smap_get(&binding->options, "network_name");
+            if (!network) {
+                continue;
+            }
+            ofport = u16_to_ofp(simap_get(&localnet_to_ofport, network));
+        } else if (binding->parent_port) {
             ofport = u16_to_ofp(simap_get(&lport_to_ofport,
                                           binding->parent_port));
             if (ofport && binding->tag) {
@@ -135,6 +178,9 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
 
         struct match match;
         if (local) {
+            struct ofpbuf *local_ofpacts = &ofpacts;
+            bool add_input_flow = true;
+
             /* Packets that arrive from a vif can belong to a VM or
              * to a container located inside that VM. Packets that
              * arrive from containers have a tag (vlan) associated with them.
@@ -150,53 +196,74 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
              * For both types of traffic: set MFF_LOG_INPORT to the
              * logical input port, MFF_METADATA to the logical datapath, and
              * resubmit into the logical pipeline starting at table 16. */
-            match_init_catchall(&match);
-            ofpbuf_clear(&ofpacts);
-            match_set_in_port(&match, ofport);
-            if (tag) {
-                match_set_dl_vlan(&match, htons(tag));
+            if (!strcmp(binding->type, "localnet")) {
+                const char *network = smap_get(&binding->options, "network_name");
+                struct shash_node *node;
+                struct localnet_flow *ln_flow;
+                node = shash_find(&localnet_inputs, network);
+                if (!node) {
+                    ln_flow = xmalloc(sizeof *ln_flow);
+                    init_input_match(&ln_flow->match, ofport, tag);
+                    ofpbuf_init(&ln_flow->ofpacts, 0);
+                    /* Set OVN_FLAG_LOCALNET to indicate that the packet came in from a
+                     * localnet port. */
+                    struct ofpact_set_field *sf = ofpact_put_SET_FIELD(&ln_flow->ofpacts);
+                    sf->field = mf_from_id(MFF_OVN_FLAGS);
+                    sf->value.be64 = htonl(OVN_FLAG_LOCALNET);
+                    sf->mask.be64 = OVS_BE64_MAX;
+
+                    node = shash_add(&localnet_inputs, network, ln_flow);
+                }
+                ln_flow = node->data;
+                local_ofpacts = &ln_flow->ofpacts;
+                add_input_flow = false;
+            } else {
+                ofpbuf_clear(local_ofpacts);
+                init_input_match(&match, ofport, tag);
             }
 
             /* Set MFF_METADATA. */
-            struct ofpact_set_field *sf = ofpact_put_SET_FIELD(&ofpacts);
+            struct ofpact_set_field *sf = ofpact_put_SET_FIELD(local_ofpacts);
             sf->field = mf_from_id(MFF_METADATA);
             sf->value.be64 = htonll(ldp);
             sf->mask.be64 = OVS_BE64_MAX;
 
             /* Set MFF_LOG_INPORT. */
-            sf = ofpact_put_SET_FIELD(&ofpacts);
+            sf = ofpact_put_SET_FIELD(local_ofpacts);
             sf->field = mf_from_id(MFF_LOG_INPORT);
             sf->value.be32 = htonl(binding->tunnel_key);
             sf->mask.be32 = OVS_BE32_MAX;
 
             /* Strip vlans. */
             if (tag) {
-                ofpact_put_STRIP_VLAN(&ofpacts);
+                ofpact_put_STRIP_VLAN(local_ofpacts);
             }
 
             /* Resubmit to first logical pipeline table. */
-            struct ofpact_resubmit *resubmit = ofpact_put_RESUBMIT(&ofpacts);
+            struct ofpact_resubmit *resubmit = ofpact_put_RESUBMIT(local_ofpacts);
             resubmit->in_port = OFPP_IN_PORT;
             resubmit->table_id = 16;
-            ofctrl_add_flow(flow_table, 0, tag ? 150 : 100, &match, &ofpacts);
+            if (add_input_flow) {
+                ofctrl_add_flow(flow_table, 0, tag ? 150 : 100, &match, &ofpacts);
 
-            /* Table 0, Priority 50.
-             * =====================
-             *
-             * For packets that arrive from a remote node destined to this
-             * local vif: deliver directly to the vif. If the destination
-             * is a container sitting behind a vif, tag the packets. */
-            match_init_catchall(&match);
-            ofpbuf_clear(&ofpacts);
-            match_set_tun_id(&match, htonll(binding->tunnel_key));
-            if (tag) {
-                struct ofpact_vlan_vid *vlan_vid;
-                vlan_vid = ofpact_put_SET_VLAN_VID(&ofpacts);
-                vlan_vid->vlan_vid = tag;
-                vlan_vid->push_vlan_if_needed = true;
+                /* Table 0, Priority 50.
+                 * =====================
+                 *
+                 * For packets that arrive from a remote node destined to this
+                 * local vif: deliver directly to the vif. If the destination
+                 * is a container sitting behind a vif, tag the packets. */
+                match_init_catchall(&match);
+                ofpbuf_clear(&ofpacts);
+                match_set_tun_id(&match, htonll(binding->tunnel_key));
+                if (tag) {
+                    struct ofpact_vlan_vid *vlan_vid;
+                    vlan_vid = ofpact_put_SET_VLAN_VID(&ofpacts);
+                    vlan_vid->vlan_vid = tag;
+                    vlan_vid->push_vlan_if_needed = true;
+                }
+                ofpact_put_OUTPUT(&ofpacts)->port = ofport;
+                ofctrl_add_flow(flow_table, 0, 50, &match, &ofpacts);
             }
-            ofpact_put_OUTPUT(&ofpacts)->port = ofport;
-            ofctrl_add_flow(flow_table, 0, 50, &match, &ofpacts);
         }
 
         /* Table 64, Priority 100.
@@ -220,6 +287,10 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
         ofpbuf_clear(&ofpacts);
         match_set_reg(&match, MFF_LOG_OUTPORT - MFF_REG0, binding->tunnel_key);
         if (!local) {
+            /* Packets that came in on a localnet port should be output to local
+             * vifs only. */
+            match_set_reg_masked(&match, MFF_OVN_FLAGS - MFF_REG0, 0, OVN_FLAG_LOCALNET);
+
             /* Set MFF_TUN_ID. */
             struct ofpact_set_field *sf = ofpact_put_SET_FIELD(&ofpacts);
             sf->field = mf_from_id(MFF_TUN_ID);
@@ -270,7 +341,19 @@ physical_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
         ofctrl_add_flow(flow_table, 64, 50, &match, &ofpacts);
     }
 
+    struct shash_node *ln_flow_node, *ln_flow_node_next;
+    struct localnet_flow *ln_flow;
+    SHASH_FOR_EACH_SAFE (ln_flow_node, ln_flow_node_next, &localnet_inputs) {
+        ln_flow = ln_flow_node->data;
+        shash_delete(&localnet_inputs, ln_flow_node);
+        ofctrl_add_flow(flow_table, 0, 100, &ln_flow->match, &ln_flow->ofpacts);
+        ofpbuf_uninit(&ln_flow->ofpacts);
+        free(ln_flow);
+    }
+    shash_destroy(&localnet_inputs);
+
     ofpbuf_uninit(&ofpacts);
     simap_destroy(&lport_to_ofport);
     simap_destroy(&chassis_to_ofport);
+    simap_destroy(&localnet_to_ofport);
 }
