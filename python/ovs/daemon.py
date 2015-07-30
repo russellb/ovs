@@ -133,30 +133,30 @@ def _make_pidfile():
         global file_handle
 
         file_handle = open(tmpfile, "w")
-    except IOError, e:
+    except IOError as e:
         _fatal("%s: create failed (%s)" % (tmpfile, e.strerror))
 
     try:
         s = os.fstat(file_handle.fileno())
-    except IOError, e:
+    except IOError as e:
         _fatal("%s: fstat failed (%s)" % (tmpfile, e.strerror))
 
     try:
         file_handle.write("%s\n" % pid)
         file_handle.flush()
-    except OSError, e:
+    except OSError as e:
         _fatal("%s: write failed: %s" % (tmpfile, e.strerror))
 
     try:
         fcntl.lockf(file_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except IOError, e:
+    except IOError as e:
         _fatal("%s: fcntl failed: %s" % (tmpfile, e.strerror))
 
     # Rename or link it to the correct name.
     if _overwrite_pidfile:
         try:
             os.rename(tmpfile, _pidfile)
-        except OSError, e:
+        except OSError as e:
             _fatal("failed to rename \"%s\" to \"%s\" (%s)"
                    % (tmpfile, _pidfile, e.strerror))
     else:
@@ -164,7 +164,7 @@ def _make_pidfile():
             try:
                 os.link(tmpfile, _pidfile)
                 error = 0
-            except OSError, e:
+            except OSError as e:
                 error = e.errno
             if error == errno.EEXIST:
                 _check_already_running()
@@ -200,7 +200,7 @@ def _waitpid(pid, options):
     while True:
         try:
             return os.waitpid(pid, options)
-        except OSError, e:
+        except OSError as e:
             if e.errno == errno.EINTR:
                 pass
             return -e.errno, 0
@@ -209,13 +209,13 @@ def _waitpid(pid, options):
 def _fork_and_wait_for_startup():
     try:
         rfd, wfd = os.pipe()
-    except OSError, e:
+    except OSError as e:
         sys.stderr.write("pipe failed: %s\n" % os.strerror(e.errno))
         sys.exit(1)
 
     try:
         pid = os.fork()
-    except OSError, e:
+    except OSError as e:
         sys.stderr.write("could not fork: %s\n" % os.strerror(e.errno))
         sys.exit(1)
 
@@ -227,7 +227,7 @@ def _fork_and_wait_for_startup():
             try:
                 s = os.read(rfd, 1)
                 error = 0
-            except OSError, e:
+            except OSError as e:
                 s = ""
                 error = e.errno
             if error != errno.EINTR:
@@ -315,7 +315,8 @@ def _monitor_daemon(daemon_pid):
                         wakeup = last_restart + 10000
                         if now > wakeup:
                             break
-                        print "sleep %f" % ((wakeup - now) / 1000.0)
+                        sys.stdout.write("sleep %f\n" % (
+                            (wakeup - now) / 1000.0))
                         time.sleep((wakeup - now) / 1000.0)
                 last_restart = ovs.timeval.msec()
 
@@ -406,7 +407,7 @@ def __read_pidfile(pidfile, delete_if_stale):
 
     try:
         file_handle = open(pidfile, "r+")
-    except IOError, e:
+    except IOError as e:
         if e.errno == errno.ENOENT and delete_if_stale:
             return 0
         vlog.warn("%s: open: %s" % (pidfile, e.strerror))
@@ -439,7 +440,7 @@ def __read_pidfile(pidfile, delete_if_stale):
         # We won the right to delete the stale pidfile.
         try:
             os.unlink(pidfile)
-        except IOError, e:
+        except IOError as e:
             vlog.warn("%s: failed to delete stale pidfile (%s)"
                             % (pidfile, e.strerror))
             return -e.errno
@@ -447,7 +448,7 @@ def __read_pidfile(pidfile, delete_if_stale):
             vlog.dbg("%s: deleted stale pidfile" % pidfile)
             file_handle.close()
             return 0
-    except IOError, e:
+    except IOError as e:
         if e.errno not in [errno.EACCES, errno.EAGAIN]:
             vlog.warn("%s: fcntl: %s" % (pidfile, e.strerror))
             return -e.errno
@@ -456,7 +457,7 @@ def __read_pidfile(pidfile, delete_if_stale):
     try:
         try:
             error = int(file_handle.readline())
-        except IOError, e:
+        except IOError as e:
             vlog.warn("%s: read: %s" % (pidfile, e.strerror))
             error = -e.errno
         except ValueError:
