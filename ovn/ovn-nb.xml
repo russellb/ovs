@@ -59,6 +59,10 @@
       Access control rules that apply to packets within the logical switch.
     </column>
 
+    <column name="chains">
+      A set of port chains on this switch.  See <ref table="Logical_Port_Chain"/>.
+    </column>
+
     <group title="Common Columns">
       <column name="external_ids">
         See <em>External IDs</em> at the beginning of this document.
@@ -532,5 +536,81 @@
         See <em>External IDs</em> at the beginning of this document.
       </column>
     </group>
+  </table>
+  <table name="Logical_Port_Chain" title="Logical Port Chains">
+    <p>
+      A logical port chain on a logical switch.
+    </p>
+
+    <p>
+      There are use cases for wanting to match on traffic of a given specification
+      and then send it through a chain of logical ports.  This is often referred to
+      as "Service Function Chaining", or "SFC".  OVN Logical Port Chains provide this
+      functionality for traffic on an OVN Logical Switch.
+    </p>
+
+    <p>
+      A port chain includes a traffic classifier, the <ref column="match"/> column,
+      and a list of port pairs, the <ref column="port_pairs"/> column, which defines
+      the series of logical ports where services are running that will process this
+      traffic.
+    </p>
+
+    <column name="match">
+      <p>
+        The packets that the port chain should match, in the same expression
+        language used for the <ref column="match" table="Logical_Flow"
+        db="OVN_Southbound"/> column in the OVN Southbound database's
+        <ref table="Logical_Flow" db="OVN_Southbound"/> table.
+      </p>
+    </column>
+    <column name="port_pairs">
+      <p>
+        An ordered list of port pairs.  Once packets match a chain using the
+        specification in <ref column="match"/>, they are sent down the chain
+        of port pairs, starting with the <ref column="outport" table="Logical_Port_Pair"/>
+        logical port in the first <ref table="Logical_Port_Pair"/>.
+        When a packet comes back into the <ref table="Logical_Switch"/>
+        from a port listed in the <ref column="inport" table="Logical_Port_Pair"/>
+        column of a <ref table="Logical_Port_Pair"/>, its next destination will be
+        <ref column="outport" table="Logical_Port_Pair"/> of the next
+        <ref table="Logical_Port_Pair"/> in this list.
+      </p>
+    </column>
+  </table>
+  <table name="Logical_Port_Pair" title="A pair of Logical Ports">
+    <p>
+      An input and output port pair for a <ref table="Logical_Port_Chain"/>.
+    </p>
+
+    <p>
+      A list of these port pairs define the procesing pipeline for packets
+      that matched a <ref table="Logical_Port_Chain"/>.
+    </p>
+
+    <column name="outport">
+      <p>
+        The destination port for a packet.  In other words, when the next destination
+        for a packet is this <ref table="Logical_Port_Pair"/>, this is the
+        <ref table="Logical_Port"/> that will be used as the packet's next destination.
+      </p>
+    </column>
+    <column name="inport">
+      <p>
+        The source port for a packet.  When a packet arrives at a logical switch from
+        this <ref table="Logical_Port"/>, the packet's next destination will be the
+        <ref column="outport"/> of the next <ref table="Logical_Port_Pair"/> in the
+        <ref column="port_pairs" table="Logical_Port_Chain"/> list on a
+        <ref table="Logical_Port_Chain"/>.  Note that it will be common for
+        <ref column="inport"/> and <ref column="outport"/> to be equal.
+      </p>
+    </column>
+    <column name="sortkey">
+      <p>
+        An integer used for ordering instances of <ref table="Logical_Port_Pair"/>
+        in the <ref column="port_pairs" table="Logical_Port_Chain"/> column
+        of <ref table="Logical_Port_Chain"/>.
+      </p>
+    </column>
   </table>
 </database>
