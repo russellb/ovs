@@ -1059,6 +1059,176 @@ nbctl_acl_del(struct ctl_context *ctx)
         }
     }
 }
+
+static void
+nbctl_lport_chain_add(struct ctl_context *ctx)
+{
+    const struct nbrec_logical_switch *lswitch;
+
+    lswitch = lswitch_by_name_or_uuid(ctx, ctx->argv[1]);
+    if (!lswitch) {
+        return;
+    }
+
+    struct nbrec_logical_port_chain *lport_chain;
+    lport_chain = nbrec_logical_port_chain_insert(ctx->txn);
+    nbrec_logical_port_chain_set_match(lport_chain, ctx->argv[2]);
+
+    size_t i;
+    for (i = 0; i < ctx->argc - 3; i++) {
+        const char *port_pair = ctx->argv[i + 3];
+        char *outport, *inport;
+
+        inport = xstrdup(port_pair);
+        outport = strsep(&inport, ",");
+
+        /* outport *must* exist.  inport is optional. */
+        const struct nbrec_logical_port *lport_outport;
+        lport_outport = lport_by_name_or_uuid(ctx, outport);
+        if (!lport_outport) {
+            VLOG_ERR("Invalid port pair: %s", port_pair);
+            free(outport);
+            continue;
+        }
+
+        const struct nbrec_logical_port *lport_inport = NULL;
+        if (inport && *inport) {
+            lport_inport = lport_by_name_or_uuid(ctx, inport);
+            if (!lport_inport) {
+                VLOG_ERR("Invalid port pair: %s", port_pair);
+                free(outport);
+                continue;
+            }
+        }
+
+        free(outport);
+
+        struct nbrec_logical_port_pair *lport_pair;
+        lport_pair = nbrec_logical_port_pair_insert(ctx->txn);
+        nbrec_logical_port_pair_set_outport(lport_pair, lport_outport);
+        nbrec_logical_port_pair_set_inport(lport_pair, lport_inport);
+        int64_t sortkey = i;
+        nbrec_logical_port_pair_set_sortkey(lport_pair, &sortkey, 1);
+
+        struct nbrec_logical_port_pair **lport_pairs;
+        lport_pairs = xmalloc(sizeof *lport_pairs *
+                              (lport_chain->n_port_pairs + 1));
+        memcpy(lport_pairs, lport_chain->port_pairs,
+               sizeof *lport_pairs * lport_chain->n_port_pairs);
+        lport_pairs[lport_chain->n_port_pairs] = lport_pair;
+        nbrec_logical_port_chain_set_port_pairs(lport_chain, lport_pairs,
+                                                lport_chain->n_port_pairs + 1);
+        free(lport_pairs);
+    }
+
+    struct nbrec_logical_port_chain **lport_chains;
+    lport_chains = xmalloc(sizeof *lport_chains * (lswitch->n_chains + 1));
+    memcpy(lport_chains, lswitch->chains,
+           sizeof *lport_chains * lswitch->n_chains);
+    lport_chains[lswitch->n_chains] = lport_chain;
+    nbrec_logical_switch_set_chains(lswitch, lport_chains,
+                                    lswitch->n_chains + 1);
+    free(lport_chains);
+}
+
+static void
+nbctl_lport_chain_del(struct ctl_context *ctx OVS_UNUSED)
+{
+    const struct nbrec_logical_switch *lswitch;
+
+    lswitch = lswitch_by_name_or_uuid(ctx, ctx->argv[1]);
+    if (!lswitch) {
+        return;
+    }
+
+    const char *match = ctx->argv[2];
+    struct nbrec_logical_port_chain **new_chains;
+    new_chains = xmalloc(sizeof *new_chains * lswitch->n_chains);
+    size_t n_chains = 0;
+    size_t i;
+    for  (i = 0; i < lswitch->n_chains; i++) {
+        if (!strcmp(lswitch->chains[i]->match, match)) {
+            /* Let this chain get garbage collected. */
+            continue;
+        }
+        new_chains[n_chains++] = lswitch->chains[i];
+    }
+    nbrec_logical_switch_set_chains(lswitch, new_chains, n_chains);
+    free(new_chains);
+}
+
+static int
+cmp_port_pairs(const void *pp1_, const void *pp2_)
+{
+    const struct nbrec_logical_port_pair *const *pp1p = pp1_;
+    const struct nbrec_logical_port_pair *const *pp2p = pp2_;
+    const struct nbrec_logical_port_pair *pp1 = *pp1p;
+    const struct nbrec_logical_port_pair *pp2 = *pp2p;
+
+    if (pp1->n_sortkey == 0 || pp2->n_sortkey == 0) {
+        return 0;
+    }
+
+    const int64_t key1 = pp1->sortkey[0];
+    const int64_t key2 = pp2->sortkey[0];
+
+    if (key1 < key2) {
+        return -1;
+    } else if (key1 > key2) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+static struct nbrec_logical_port_pair **
+sorted_lport_pairs(const struct nbrec_logical_port_chain *lport_chain)
+{
+    struct nbrec_logical_port_pair **lport_pairs
+        = xmalloc(sizeof *lport_pairs * lport_chain->n_port_pairs);
+    memcpy(lport_pairs, lport_chain->port_pairs,
+           sizeof *lport_pairs * lport_chain->n_port_pairs);
+    qsort(lport_pairs, lport_chain->n_port_pairs, sizeof *lport_pairs,
+            cmp_port_pairs);
+    return lport_pairs;
+}
+
+static void
+nbctl_lport_chain_list(struct ctl_context *ctx OVS_UNUSED)
+{
+    const struct nbrec_logical_switch *lswitch;
+
+    lswitch = lswitch_by_name_or_uuid(ctx, ctx->argv[1]);
+    if (!lswitch) {
+        return;
+    }
+
+    size_t i;
+    for (i = 0; i < lswitch->n_chains; i++) {
+        const struct nbrec_logical_port_chain *chain = lswitch->chains[i];
+        printf("lport-chain "UUID_FMT"\n", UUID_ARGS(&chain->header_.uuid));
+        printf("    match (%s)\n", chain->match);
+
+        struct nbrec_logical_port_pair **lport_pairs = sorted_lport_pairs(chain);
+        size_t j;
+        for (j = 0; j < chain->n_port_pairs; j++) {
+            const struct nbrec_logical_port_pair *lport_pair = lport_pairs[j];
+            printf("    lport-pair "UUID_FMT"\n",
+                    UUID_ARGS(&lport_pair->header_.uuid));
+            if (lport_pair->outport) {
+                printf("        outport "UUID_FMT" (%s)\n",
+                        UUID_ARGS(&lport_pair->outport->header_.uuid),
+                        lport_pair->outport->name);
+            }
+            if (lport_pair->inport) {
+                printf("        inport  "UUID_FMT" (%s)\n",
+                        UUID_ARGS(&lport_pair->inport->header_.uuid),
+                        lport_pair->inport->name);
+            }
+        }
+        free(lport_pairs);
+    }
+}
 
 static const struct ctl_table_class tables[] = {
     {&nbrec_table_logical_switch,
@@ -1331,6 +1501,14 @@ static const struct ctl_command_syntax nbctl_commands[] = {
       nbctl_lport_set_options, NULL, "", RW },
     { "lport-get-options", 1, 1, "LPORT", NULL, nbctl_lport_get_options, NULL,
       "", RO },
+
+    /* lport-chain commands. */
+    { "lport-chain-add", 3, INT_MAX, "LSWITCH MATCH [INPORT,OUTPORT]...", NULL,
+      nbctl_lport_chain_add, NULL, "", RW },
+    { "lport-chain-del", 2, 2, "LSWITCH MATCH", NULL,
+      nbctl_lport_chain_del, NULL, "", RW },
+    { "lport-chain-list", 1, 1, "LSWITCH", NULL, nbctl_lport_chain_list,
+      NULL, "", RO },
 
     {NULL, 0, 0, NULL, NULL, NULL, NULL, "", RO},
 };
