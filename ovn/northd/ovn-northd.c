@@ -88,7 +88,8 @@ enum ovn_stage {
     PIPELINE_STAGE(SWITCH, IN,  PORT_SEC,    0, "switch_in_port_sec")   \
     PIPELINE_STAGE(SWITCH, IN,  PRE_ACL,     1, "switch_in_pre_acl")    \
     PIPELINE_STAGE(SWITCH, IN,  ACL,         2, "switch_in_acl")        \
-    PIPELINE_STAGE(SWITCH, IN,  L2_LKUP,     3, "switch_in_l2_lkup")    \
+    PIPELINE_STAGE(SWITCH, IN,  CHAIN,       3, "switch_in_chain")      \
+    PIPELINE_STAGE(SWITCH, IN,  L2_LKUP,     4, "switch_in_l2_lkup")    \
                                                                         \
     /* Logical switch egress stages. */                                 \
     PIPELINE_STAGE(SWITCH, OUT, PRE_ACL,     0, "switch_out_pre_acl")   \
@@ -1091,6 +1092,30 @@ build_acls(struct ovn_datapath *od, struct hmap *lflows)
     }
 }
 
+static int
+cmp_port_pairs(const void *pp1_, const void *pp2_)
+{
+    const struct nbrec_logical_port_pair *const *pp1p = pp1_;
+    const struct nbrec_logical_port_pair *const *pp2p = pp2_;
+    const struct nbrec_logical_port_pair *pp1 = *pp1p;
+    const struct nbrec_logical_port_pair *pp2 = *pp2p;
+
+    if (pp1->n_sortkey == 0 || pp2->n_sortkey == 0) {
+        return 0;
+    }
+
+    const int64_t key1 = pp1->sortkey[0];
+    const int64_t key2 = pp2->sortkey[0];
+
+    if (key1 < key2) {
+        return -1;
+    } else if (key1 > key2) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
 static void
 build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
                     struct hmap *lflows, struct hmap *mcgroups)
@@ -1151,7 +1176,83 @@ build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
         ds_destroy(&match);
     }
 
-    /* Ingress table 3: Destination lookup, broadcast and multicast handling
+    /* Ingress table 3: Port chain handling */
+    HMAP_FOR_EACH (od, key_node, datapaths) {
+        if (!od->nbs) {
+            continue;
+        }
+
+        /* Ingress table 3: default to passing through to the next table
+         * (priority 0) */
+        ovn_lflow_add(lflows, od, S_SWITCH_IN_CHAIN, 0, "1", "next;");
+
+        size_t i;
+        for (i = 0; i < od->nbs->n_chains; i++) {
+            const struct nbrec_logical_port_chain *chain
+                = od->nbs->chains[i];
+
+            if (chain->n_port_pairs == 0) {
+                continue;
+            }
+
+            struct nbrec_logical_port_pair **port_pairs
+                = xmalloc(sizeof *port_pairs * chain->n_port_pairs);
+            memcpy(port_pairs, chain->port_pairs,
+                    sizeof *port_pairs * chain->n_port_pairs);
+            qsort(port_pairs, chain->n_port_pairs, sizeof *port_pairs,
+                    cmp_port_pairs);
+
+            const struct nbrec_logical_port_pair *first_pair = port_pairs[0];
+            if (first_pair->outport) {
+                op = ovn_port_find(ports, first_pair->outport->name);
+
+                struct ds action = DS_EMPTY_INITIALIZER;
+                ds_put_format(&action, "outport = %s; output;", op->json_key);
+
+                /* Ingress table 3: Set outport to the first port of a chain if
+                 * packet matches a chain.
+                 * (priority 50) */
+                ovn_lflow_add(lflows, od, S_SWITCH_IN_CHAIN, 50,
+                              chain->match, ds_cstr(&action));
+
+                ds_destroy(&action);
+            }
+
+            size_t j;
+            for (j = 0; j < chain->n_port_pairs - 1; j++) {
+                const struct nbrec_logical_port_pair *cur_pair
+                    = port_pairs[j];
+                const struct nbrec_logical_port_pair *next_pair
+                    = port_pairs[j + 1];
+                if (!cur_pair->inport || !next_pair->outport) {
+                    continue;
+                }
+                const struct ovn_port *op_in
+                    = ovn_port_find(ports, cur_pair->inport->name);
+                const struct ovn_port *op_out
+                    = ovn_port_find(ports, next_pair->outport->name);
+
+                struct ds match = DS_EMPTY_INITIALIZER;
+                ds_put_format(&match, "inport == %s", op_in->json_key);
+
+                struct ds action = DS_EMPTY_INITIALIZER;
+                ds_put_format(&action, "outport = %s; output;", op_out->json_key);
+
+                /* Ingress table 3: Set outport for a known inport on a port
+                 * chain.
+                 * (priority 100) */
+                ovn_lflow_add(lflows, od, S_SWITCH_IN_CHAIN, 100,
+                              ds_cstr(&match), ds_cstr(&action));
+
+                ds_destroy(&match);
+                ds_destroy(&action);
+            }
+
+            free(port_pairs);
+        }
+    }
+
+    /* Ingress table 4: Destination lookup, broadcast and multicast handling
      * (priority 100). */
     HMAP_FOR_EACH (op, key_node, ports) {
         if (!op->nbs) {
@@ -1171,7 +1272,7 @@ build_lswitch_flows(struct hmap *datapaths, struct hmap *ports,
                       "outport = \""MC_FLOOD"\"; output;");
     }
 
-    /* Ingress table 3: Destination lookup, unicast handling (priority 50), */
+    /* Ingress table 4: Destination lookup, unicast handling (priority 50), */
     HMAP_FOR_EACH (op, key_node, ports) {
         if (!op->nbs) {
             continue;
