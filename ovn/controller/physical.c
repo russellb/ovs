@@ -269,6 +269,7 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
          */
 
         int tag = 0;
+        int mpls_label = 0;
         ofp_port_t ofport;
         if (!strcmp(binding->type, "localnet")) {
             const char *network = smap_get(&binding->options, "network_name");
@@ -280,13 +281,22 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
                 tag = *binding->tag;
             }
         } else if (binding->parent_port) {
-            if (!binding->tag) {
+            const char *mpls_label_s = smap_get(&binding->options, "mpls_label");
+
+            if (!binding->tag && !mpls_label_s) {
                 continue;
             }
             ofport = u16_to_ofp(simap_get(&localvif_to_ofport,
                                           binding->parent_port));
             if (ofport) {
-                tag = *binding->tag;
+                if (binding->tag) {
+                    tag = *binding->tag;
+                } else if (mpls_label_s) {
+                    if (ovs_scan(mpls_label_s, "%d", &mpls_label) != 1) {
+                        static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 1);
+                        VLOG_WARN_RL(&rl, "Invalid value of mpls_label: %s", mpls_label_s);
+                    }
+                }
             }
         } else {
             ofport = u16_to_ofp(simap_get(&localvif_to_ofport,
@@ -373,6 +383,9 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
                 match_set_in_port(&match, ofport);
                 if (tag) {
                     match_set_dl_vlan(&match, htons(tag));
+                } else if (mpls_label) {
+                    match_set_dl_type(&match, htons(ETH_TYPE_MPLS));
+                    match_set_mpls_label(&match, 0, htonl(mpls_label));
                 }
 
                 if (zone_id) {
@@ -388,12 +401,15 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
                 /* Strip vlans. */
                 if (tag) {
                     ofpact_put_STRIP_VLAN(&ofpacts);
+                } else if (mpls_label) {
+                    ofpact_put_POP_MPLS(&ofpacts);
                 }
 
                 /* Resubmit to first logical ingress pipeline table. */
                 put_resubmit(OFTABLE_LOG_INGRESS_PIPELINE, &ofpacts);
                 ofctrl_add_flow(flow_table, OFTABLE_PHY_TO_LOG,
-                                tag ? 150 : 100, &match, &ofpacts);
+                                (tag || mpls_label) ? 150 : 100,
+                                &match, &ofpacts);
             }
 
             /* Table 33, priority 100.
@@ -443,6 +459,20 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
                  * checked back in table 34), so set the in_port to zero. */
                 put_stack(MFF_IN_PORT, ofpact_put_STACK_PUSH(&ofpacts));
                 put_load(0, MFF_IN_PORT, 0, 16, &ofpacts);
+            } else if (mpls_label) {
+                struct ofpact_push_mpls *push_mpls
+                    = ofpact_put_PUSH_MPLS(&ofpacts);
+                push_mpls->ethertype = ntohs(ETH_TYPE_MPLS);
+
+                struct ofpact_mpls_label *set_mpls_label
+                    = ofpact_put_SET_MPLS_LABEL(&ofpacts);
+                set_mpls_label->label = htonl(mpls_label);
+
+                /* A packet might need to hair-pin back into its ingress
+                 * OpenFlow port (to a different logical port, which we already
+                 * checked back in table 34), so set the in_port to zero. */
+                put_stack(MFF_IN_PORT, ofpact_put_STACK_PUSH(&ofpacts));
+                put_load(0, MFF_IN_PORT, 0, 16, &ofpacts);
             }
             ofpact_put_OUTPUT(&ofpacts)->port = ofport;
             if (tag) {
@@ -452,6 +482,9 @@ physical_run(struct controller_ctx *ctx, enum mf_field_id mff_ovn_geneve,
                  * switch will also contain the tag. Also revert the zero'd
                  * in_port. */
                 ofpact_put_STRIP_VLAN(&ofpacts);
+                put_stack(MFF_IN_PORT, ofpact_put_STACK_POP(&ofpacts));
+            } else if (mpls_label) {
+                ofpact_put_POP_MPLS(&ofpacts);
                 put_stack(MFF_IN_PORT, ofpact_put_STACK_POP(&ofpacts));
             }
             ofctrl_add_flow(flow_table, OFTABLE_LOG_TO_PHY, 100,
