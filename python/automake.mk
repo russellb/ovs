@@ -33,7 +33,9 @@ ovs_pyfiles = \
 	python/ovs/unixctl/server.py \
 	python/ovs/util.py \
 	python/ovs/version.py \
-	python/ovs/vlog.py
+	python/ovs/vlog.py \
+	python/ovs/tests/__init__.py \
+	python/ovs/tests/test_ovs.py
 
 # These python files are used at build time but not runtime,
 # so they are not installed.
@@ -45,6 +47,12 @@ EXTRA_DIST += \
 EXTRA_DIST += \
 	python/README.rst \
 	python/setup.py
+
+# Test suite related files
+EXTRA_DIST += \
+	python/tox.ini \
+	python/requirements.txt \
+	python/test-requirements.txt
 
 PYFILES = $(ovs_pyfiles) python/ovs/dirs.py $(ovstest_pyfiles)
 EXTRA_DIST += $(PYFILES)
