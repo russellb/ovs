@@ -1090,7 +1090,7 @@ class Transaction(object):
         self._inc_column = column
 
     def _fetch(self, row, column_name):
-        self._fetch_requests.append({"row":row, "column_name":column_name})
+        self._fetch_requests.append({"row": row, "column_name": column_name})
 
     def _write(self, row, column, datum):
         assert row._changes is not None
