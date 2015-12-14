@@ -23,9 +23,9 @@ import select
 import socket
 import struct
 import signal
+import six.moves.xmlrpc_client
 import subprocess
 import re
-import xmlrpclib
 
 
 def str_ip(ip_address):
@@ -167,7 +167,8 @@ def get_interface_from_routing_decision(ip):
 
 
 def rpc_client(ip, port):
-    return xmlrpclib.Server("http://%s:%u/" % (ip, port), allow_none=True)
+    return six.moves.xmlrpc_client.Server("http://%s:%u/" % (ip, port),
+                                          allow_none=True)
 
 
 def sigint_intercept():
