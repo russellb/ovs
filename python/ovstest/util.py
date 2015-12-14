@@ -23,9 +23,11 @@ import select
 import socket
 import struct
 import signal
-import six.moves.xmlrpc_client
 import subprocess
 import re
+
+from six.moves import range
+import six.moves.xmlrpc_client
 
 
 def str_ip(ip_address):
