@@ -35,7 +35,8 @@ ovs_pyfiles = \
 	python/ovs/version.py \
 	python/ovs/vlog.py \
 	python/ovs/tests/__init__.py \
-	python/ovs/tests/test_ovs.py
+	python/ovs/tests/test_ovs.py \
+	python/ovs/tests/test_json.py
 
 # These python files are used at build time but not runtime,
 # so they are not installed.
