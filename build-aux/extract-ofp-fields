@@ -1,5 +1,7 @@
 #! /usr/bin/python
 
+from __future__ import print_function
+
 import sys
 import os.path
 import re
@@ -116,14 +118,14 @@ def fatal(msg):
 
 def usage():
     argv0 = os.path.basename(sys.argv[0])
-    print('''\
+    print(('''\
 %(argv0)s, for extracting OpenFlow field properties from meta-flow.h
 usage: %(argv0)s INPUT [--meta-flow | --nx-match]
   where INPUT points to lib/meta-flow.h in the source directory.
 Depending on the option given, the output written to stdout is intended to be
 saved either as lib/meta-flow.inc or lib/nx-match.inc for the respective C
 file to #include.\
-''' % {"argv0": argv0})
+''' % {"argv0": argv0}))
     sys.exit(0)
 
 
@@ -384,8 +386,8 @@ def make_nx_match(fields):
     for f in fields:
         # Sort by OpenFlow version number (nx-match.c depends on this).
         for oxm in sorted(f['OXM'], key=lambda x: x[2]):
-            print("""{ .nf = { %s, %d, "%s", %s } },""" % (
-                oxm[0], oxm[2], oxm[1], f['mff']))
+            print(("""{ .nf = { %s, %d, "%s", %s } },""" % (
+                oxm[0], oxm[2], oxm[1], f['mff'])))
     print("};")
     return output
 
