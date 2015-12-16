@@ -275,22 +275,24 @@ where SCHEMA is an OVSDB schema in JSON format
 The following options are also available:
   --er-diagram=DIAGRAM.PIC    include E-R diagram from DIAGRAM.PIC
   --version=VERSION           use VERSION to display on document footer
-  -h, --help                  display this help message\
+  -h, --help                  display this help message
+  -s, --silent                Suppress output, used for validation
 """ % {'argv0': argv0})
     sys.exit(0)
 
 if __name__ == "__main__":
     try:
         try:
-            options, args = getopt.gnu_getopt(sys.argv[1:], 'hV',
+            options, args = getopt.gnu_getopt(sys.argv[1:], 'hsV',
                                               ['er-diagram=',
-                                               'version=', 'help'])
+                                               'version=', 'help', 'silent'])
         except getopt.GetoptError as geo:
             sys.stderr.write("%s: %s\n" % (argv0, geo.msg))
             sys.exit(1)
 
         er_diagram = None
         version = None
+        silent = False
         for key, value in options:
             if key == '--er-diagram':
                 er_diagram = value
@@ -298,6 +300,8 @@ if __name__ == "__main__":
                 version = value
             elif key in ['-h', '--help']:
                 usage()
+            elif key in ['-s', '--silent']:
+                silent = True
             else:
                 sys.exit(0)
 
@@ -308,10 +312,11 @@ if __name__ == "__main__":
 
         # XXX we should warn about undocumented tables or columns
         s = docsToNroff(args[0], args[1], er_diagram, version)
-        for line in s.split("\n"):
-            line = line.strip()
-            if len(line):
-                print(line)
+        if not silent:
+            for line in s.split("\n"):
+                line = line.strip()
+                if len(line):
+                    print(line)
 
     except error.Error as e:
         sys.stderr.write("%s: %s\n" % (argv0, e.msg))
