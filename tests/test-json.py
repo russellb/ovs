@@ -12,16 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import print_function
+
 import codecs
 import getopt
 import sys
 
 import ovs.json
+import six
 
 
 def print_json(json):
-    if type(json) in [str, unicode]:
-        print "error: %s" % json
+    if type(json) in [str, six.text_type]:
+        print("error: %s" % json)
         return False
     else:
         ovs.json.to_stream(json, sys.stdout)
@@ -55,13 +58,16 @@ def parse_multiple(stream):
 def main(argv):
     argv0 = argv[0]
 
-    # Make stdout and stderr UTF-8, even if they are redirected to a file.
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout)
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr)
+    # XXX When this is used with Python 3, the program produces no output
+    # at all for some reason.
+    if sys.version_info[0] == 2:
+        # Make stdout and stderr UTF-8, even if they are redirected to a file.
+        sys.stdout = codecs.getwriter("utf-8")(sys.stdout)
+        sys.stderr = codecs.getwriter("utf-8")(sys.stderr)
 
     try:
         options, args = getopt.gnu_getopt(argv[1:], '', ['multiple'])
-    except getopt.GetoptError, geo:
+    except getopt.GetoptError as geo:
         sys.stderr.write("%s: %s\n" % (argv0, geo.msg))
         sys.exit(1)
 

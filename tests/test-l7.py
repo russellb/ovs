@@ -15,9 +15,9 @@
 import argparse
 import socket
 
-from BaseHTTPServer import HTTPServer
-from SimpleHTTPServer import SimpleHTTPRequestHandler
-from SocketServer import TCPServer
+from six.moves.BaseHTTPServer import HTTPServer
+from six.moves.SimpleHTTPServer import SimpleHTTPRequestHandler
+from six.moves.socketserver import TCPServer
 
 
 class TCPServerV6(HTTPServer):
