@@ -142,7 +142,7 @@ SUFFIXES =
 check_DATA =
 check_SCRIPTS =
 pkgconfig_DATA =
-FLAKE8_PYFILES =
+FLAKE8_PYFILES = build-aux/check-structs
 
 scriptsdir = $(pkgdatadir)/scripts
 completiondir = $(sysconfdir)/bash_completion.d

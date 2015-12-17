@@ -1,5 +1,7 @@
 #! /usr/bin/python
 
+from __future__ import print_function
+
 import os.path
 import sys
 import re
@@ -26,6 +28,8 @@ includePath = ''
 inComment = False
 inDirective = False
 inputStack = []
+
+
 def getToken():
     global token
     global line
@@ -78,36 +82,44 @@ def getToken():
                     if inputStack:
                         fileName, inputFile, lineNumber = inputStack.pop()
                         continue
-                    if token == None:
+                    if token is None:
                         fatal("unexpected end of input")
                     token = None
                     return False
                 break
-    
+
+
 def fatal(msg):
-    sys.stderr.write("%s:%d: error at \"%s\": %s\n" % (fileName, lineNumber, token, msg))
+    sys.stderr.write("%s:%d: error at \"%s\": %s\n" %
+                     (fileName, lineNumber, token, msg))
     sys.exit(1)
-    
+
+
 def warn(msg):
     global anyWarnings
     anyWarnings = True
     sys.stderr.write("%s:%d: warning: %s\n" % (fileName, lineNumber, msg))
+
 
 def skipDirective():
     getToken()
     while token != '$':
         getToken()
 
+
 def isId(s):
     return re.match(idRe + "$", s) != None
+
 
 def forceId():
     if not isId(token):
         fatal("identifier expected")
 
+
 def forceInteger():
     if not re.match('[0-9]+$', token):
         fatal("integer expected")
+
 
 def match(t):
     if token == t:
@@ -116,9 +128,11 @@ def match(t):
     else:
         return False
 
+
 def forceMatch(t):
     if not match(t):
         fatal("%s expected" % t)
+
 
 def parseTaggedName():
     assert token in ('struct', 'union')
@@ -128,6 +142,7 @@ def parseTaggedName():
     name = "%s %s" % (name, token)
     getToken()
     return name
+
 
 def parseTypeName():
     if token in ('struct', 'union'):
@@ -142,6 +157,7 @@ def parseTypeName():
         return name
     else:
         fatal("unknown type \"%s\"" % name)
+
 
 def parseStruct():
     isStruct = token == 'struct'
@@ -203,6 +219,7 @@ def parseStruct():
     types[structName] = {"size": size, "alignment": alignment}
     return structName
 
+
 def checkStructs():
     if len(sys.argv) < 2:
         sys.stderr.write("at least one non-option argument required; "
@@ -211,7 +228,7 @@ def checkStructs():
 
     if '--help' in sys.argv:
         argv0 = os.path.basename(sys.argv[0])
-        print '''\
+        print('''\
 %(argv0)s, for checking struct and struct member alignment
 usage: %(argv0)s -Ipath HEADER [HEADER]...
 
@@ -226,7 +243,7 @@ assertions using OFP_ASSERT.
 
 This program is specialized for reading Open vSwitch's OpenFlow header
 files.  It will not work on arbitrary header files without extensions.\
-''' % {"argv0": argv0}
+''' % {"argv0": argv0})
         sys.exit(0)
 
     global fileName
@@ -286,6 +303,7 @@ files.  It will not work on arbitrary header files without extensions.\
         inputFile.close()
     if anyWarnings:
         sys.exit(1)
+
 
 if __name__ == '__main__':
     checkStructs()
