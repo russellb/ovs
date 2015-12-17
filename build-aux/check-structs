@@ -1,5 +1,7 @@
 #! /usr/bin/python
 
+from __future__ import print_function
+
 import os.path
 import sys
 import re
@@ -211,7 +213,7 @@ def checkStructs():
 
     if '--help' in sys.argv:
         argv0 = os.path.basename(sys.argv[0])
-        print '''\
+        print('''\
 %(argv0)s, for checking struct and struct member alignment
 usage: %(argv0)s -Ipath HEADER [HEADER]...
 
@@ -226,7 +228,7 @@ assertions using OFP_ASSERT.
 
 This program is specialized for reading Open vSwitch's OpenFlow header
 files.  It will not work on arbitrary header files without extensions.\
-''' % {"argv0": argv0}
+''' % {"argv0": argv0})
         sys.exit(0)
 
     global fileName
