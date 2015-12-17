@@ -264,6 +264,16 @@ class Connection(object):
         while True:
             if not self.input:
                 error, data = self.stream.recv(4096)
+                # Python 3 has separate types for strings and bytes.  We
+                # received bytes from a socket.  We expect it to be string
+                # data, so we convert it here as soon as possible.
+                if (data and not error
+                        and not isinstance(data, six.string_types)):
+                    try:
+                        data = data.decode('utf-8')
+                    except UnicodeError:
+                        # XXX Illegal byte sequence. Is there a better errno?
+                        error = errno.EILSEQ
                 if error:
                     if error == errno.EAGAIN:
                         return error, None
