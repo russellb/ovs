@@ -20,6 +20,7 @@ import sys
 
 import ovs.socket_util
 
+
 def main(argv):
     if len(argv) not in (2, 3):
         sys.stderr.write("usage: %s SOCKETNAME1 [SOCKETNAME2]", argv[0])
