@@ -7,6 +7,9 @@ Post-v2.5.0
      * OpenFlow 1.4+ OFPMP_QUEUE_DESC is now supported.
    - ovs-ofctl:
      * queue-get-config command now allows a queue ID to be specified.
+   - python:
+     * Added support for Python 3.4+ in addition to existing support
+       for 2.7+.
 
 v2.5.0 - xx xxx xxxx
 ---------------------
