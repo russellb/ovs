@@ -399,6 +399,20 @@ else:
    fi
    AM_CONDITIONAL([HAVE_PYTHON3], [test "$HAVE_PYTHON3" = yes])])
 
+dnl Checks for tox.
+AC_DEFUN([OVS_CHECK_TOX],
+  [AC_CACHE_CHECK(
+    [for tox],
+    [ovs_cv_tox],
+    [if (tox --version) >/dev/null 2>&1; then
+       ovs_cv_tox=yes
+       HAVE_TOX=yes
+     else
+       ovs_cv_tox=no
+       HAVE_TOX=no
+     fi])
+   AM_CONDITIONAL([HAVE_TOX], [test "$ovs_cv_tox" = yes])
+   AC_SUBST([HAVE_TOX])])
 
 dnl Checks for dot.
 AC_DEFUN([OVS_CHECK_DOT],

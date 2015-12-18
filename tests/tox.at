@@ -1,0 +1,13 @@
+AT_BANNER([tox])
+
+m4_define([TOX_PYN],
+  [AT_SETUP([tox - $1])
+   AT_KEYWORDS([python tox $4])
+   AT_SKIP_IF([test $2 = no])
+   AT_SKIP_IF([test $HAVE_TOX = no])
+   AT_CHECK([tox -c $srcdir/python/tox.ini -e $3 >/dev/null 2>&1], [0])
+   AT_CLEANUP])
+
+TOX_PYN([Python2], [$HAVE_PYTHON], [py27])
+TOX_PYN([Python3], [$HAVE_PYTHON3], [py34])
+TOX_PYN([Python PEP8], [$HAVE_PYTHON], [pep8], [pep8])
