@@ -1,25 +1,37 @@
 AT_BANNER([struct alignment checker unit tests])
 
 m4_define([check_structs], [$top_srcdir/build-aux/check-structs])
-m4_define([RUN_STRUCT_CHECKER], 
-  [AT_KEYWORDS([check-structs])
+m4_define([RUN_STRUCT_CHECKER_PY2],
+  [AT_SETUP([$1 - Python2])
+   AT_KEYWORDS([check-structs])
    AT_SKIP_IF([test $HAVE_PYTHON = no])
-   AT_DATA([test.h], [$1
+   AT_DATA([test.h], [$2
 ])
-   AT_CHECK_UNQUOTED([$PYTHON check_structs test.h], [$2], [$3], [$4])])
+   AT_CHECK_UNQUOTED([$PYTHON check_structs test.h], [$3], [$4], [$5])
+   AT_CLEANUP])
 
-AT_SETUP([check struct tail padding])
-RUN_STRUCT_CHECKER(
+m4_define([RUN_STRUCT_CHECKER_PY3],
+  [AT_SETUP([$1 - Python3])
+   AT_KEYWORDS([check-structs])
+   AT_SKIP_IF([test $HAVE_PYTHON3 = no])
+   AT_DATA([test.h], [$2
+])
+   AT_CHECK_UNQUOTED([$PYTHON3 check_structs test.h], [$3], [$4], [$5])
+   AT_CLEANUP])
+
+m4_define([RUN_STRUCT_CHECKER],
+  [RUN_STRUCT_CHECKER_PY2([$1], [$2], [$3], [$4], [$5])
+   RUN_STRUCT_CHECKER_PY3([$1], [$2], [$3], [$4], [$5])])
+
+RUN_STRUCT_CHECKER([check struct tail padding],
 [struct xyz {
     ovs_be16 x;
 };], 
   [1], [], 
   [test.h:3: warning: struct xyz needs 2 bytes of tail padding
 ])
-AT_CLEANUP
 
-AT_SETUP([check struct internal alignment])
-RUN_STRUCT_CHECKER(
+RUN_STRUCT_CHECKER([check struct internal alignment],
 [struct xyzzy {
     ovs_be16 x;
     ovs_be32 y;
@@ -27,10 +39,8 @@ RUN_STRUCT_CHECKER(
   [1], [], 
   [test.h:3: warning: struct xyzzy member y is 2 bytes short of 4-byte alignment
 ])
-AT_CLEANUP
 
-AT_SETUP([check struct declared size])
-RUN_STRUCT_CHECKER(
+RUN_STRUCT_CHECKER([check struct declared size],
 [struct wibble {
     ovs_be64 z;
 };
@@ -39,10 +49,8 @@ OFP_ASSERT(sizeof(struct wibble) == 12);
   [1], [], 
   [test.h:4: warning: struct wibble is 8 bytes long but declared as 12
 ])
-AT_CLEANUP
 
-AT_SETUP([check wrong struct's declared size])
-RUN_STRUCT_CHECKER(
+RUN_STRUCT_CHECKER([check wrong struct's declared size],
 [struct moo {
     ovs_be64 bar;
 };
@@ -53,4 +61,3 @@ struct wibble {
 OFP_ASSERT(sizeof(struct moo) == 8);
 ], [1], [], [test.h:8: warning: checking size of struct moo but struct wibble was most recently defined
 ])
-AT_CLEANUP
