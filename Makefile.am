@@ -342,7 +342,7 @@ endif
 if HAVE_FLAKE8
 ALL_LOCAL += pep8-check
 pep8-check: $(FLAKE8_PYFILES)
-	if flake8 $^ --ignore=E111,E112,E113,E123,E126,E127,E128,E129,E131,E502,E703,E713,W601; then touch $@; else exit 1; fi
+	if flake8 $^ --ignore=E111,E112,E113,E123,E126,E127,E128,E129,E131,E502,E703; then touch $@; else exit 1; fi
 endif
 
 include $(srcdir)/manpages.mk
