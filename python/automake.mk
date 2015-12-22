@@ -50,6 +50,13 @@ PYFILES = $(ovs_pyfiles) python/ovs/dirs.py $(ovstest_pyfiles)
 EXTRA_DIST += $(PYFILES)
 PYCOV_CLEAN_FILES += $(PYFILES:.py=.py,cover)
 
+FLAKE8_PYFILES += \
+	$(PYFILES) \
+	python/setup.py \
+	python/build/__init__.py \
+	python/build/nroff.py \
+	python/ovs/dirs.py
+
 if HAVE_PYTHON
 nobase_pkgdata_DATA = $(ovs_pyfiles) $(ovstest_pyfiles)
 ovs-install-data-local:
