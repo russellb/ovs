@@ -343,17 +343,22 @@ endif
 if HAVE_FLAKE8
 ALL_LOCAL += flake8-check
 # http://flake8.readthedocs.org/en/latest/warnings.html
-# E123 closing bracket does not match indentation of opening bracket's line
-# E126 continuation line over-indented for hanging indent
-# E127 continuation line over-indented for visual indent
-# E128 continuation line under-indented for visual indent
-# E129 visually indented line with same indent as next logical line
-# E131 continuation line unaligned for hanging indent
-# W503 line break before binary operator
+# All warnings explicitly selected or ignored should be listed below.
+#
+# E***, W*** -- warnings from pep8
+#   E123 closing bracket does not match indentation of opening bracket's line
+#   E126 continuation line over-indented for hanging indent
+#   E127 continuation line over-indented for visual indent
+#   E128 continuation line under-indented for visual indent
+#   E129 visually indented line with same indent as next logical line
+#   E131 continuation line unaligned for hanging indent
+#   W503 line break before binary operator
+# F*** -- warnings native to flake8
 # D*** -- warnings from flake8-docstrings plugin
 # H*** -- warnings from flake8 hacking plugin (custom style checks beyond PEP8)
+#   H231 Python 3.x incompatible 'except x,y:' construct
 flake8-check: $(FLAKE8_PYFILES)
-	$(AM_V_GEN) if flake8 $^ --ignore=E123,E126,E127,E128,E129,E131,W503,D,H ${FLAKE8_FLAGS}; then touch $@; else exit 1; fi
+	$(AM_V_GEN) if flake8 $^ --select=H231 --ignore=E123,E126,E127,E128,E129,E131,W503,D,H ${FLAKE8_FLAGS}; then touch $@; else exit 1; fi
 endif
 
 include $(srcdir)/manpages.mk
