@@ -33,6 +33,7 @@
 #include "ovn/lib/ovn-sb-idl.h"
 #include "poll-loop.h"
 #include "fatal-signal.h"
+#include "lib/hmap.h"
 #include "lib/vswitch-idl.h"
 #include "smap.h"
 #include "stream.h"
@@ -267,6 +268,10 @@ main(int argc, char *argv[])
     unixctl_command_register("ct-zone-list", "", 0, 0,
                              ct_zone_list, &ct_zones);
 
+    /* Contains bare "struct hmap_node"s whose hash values are the tunnel_key
+     * of datapaths with at least one local port binding. */
+    struct hmap local_datapaths = HMAP_INITIALIZER(&local_datapaths);
+
     /* Main loop. */
     exiting = false;
     while (!exiting) {
@@ -288,7 +293,8 @@ main(int argc, char *argv[])
         if (chassis_id) {
             chassis_run(&ctx, chassis_id);
             encaps_run(&ctx, br_int, chassis_id);
-            binding_run(&ctx, br_int, chassis_id, &ct_zones, ct_zone_bitmap);
+            binding_run(&ctx, br_int, chassis_id, &ct_zones, ct_zone_bitmap,
+                    &local_datapaths);
         }
 
         if (br_int) {
@@ -300,7 +306,8 @@ main(int argc, char *argv[])
             lflow_run(&ctx, &flow_table, &ct_zones);
             if (chassis_id) {
                 physical_run(&ctx, mff_ovn_geneve,
-                             br_int, chassis_id, &ct_zones, &flow_table);
+                             br_int, chassis_id, &ct_zones, &flow_table,
+                             &local_datapaths);
             }
             ofctrl_put(&flow_table);
             hmap_destroy(&flow_table);
@@ -359,6 +366,13 @@ main(int argc, char *argv[])
     pinctrl_destroy();
 
     simap_destroy(&ct_zones);
+
+    struct hmap_node *node;
+    while ((node = hmap_first(&local_datapaths))) {
+        hmap_remove(&local_datapaths, node);
+        free(node);
+    }
+    hmap_destroy(&local_datapaths);
 
     ovsdb_idl_loop_destroy(&ovs_idl_loop);
     ovsdb_idl_loop_destroy(&ovnsb_idl_loop);
