@@ -37,5 +37,8 @@ void ofctrl_destroy(void);
 /* Flow table interface to the rest of ovn-controller. */
 void ofctrl_add_flow(struct hmap *flows, uint8_t table_id, uint16_t priority,
                      const struct match *, const struct ofpbuf *ofpacts);
+void ofctrl_add_flow_ctx(struct hmap *flows, uint8_t table_id, uint16_t priority,
+                     const struct match *, const struct ofpbuf *ofpacts,
+                     struct controller_ctx *ctx);
 
 #endif /* ovn/ofctrl.h */

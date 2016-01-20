@@ -359,8 +359,8 @@ lflow_run(struct controller_ctx *ctx, struct hmap *flow_table,
                 m->match.flow.conj_id += conj_id_ofs;
             }
             if (!m->n) {
-                ofctrl_add_flow(flow_table, ptable, lflow->priority,
-                                &m->match, &ofpacts);
+                ofctrl_add_flow_ctx(flow_table, ptable, lflow->priority,
+                                &m->match, &ofpacts, ctx);
             } else {
                 uint64_t conj_stubs[64 / 8];
                 struct ofpbuf conj;
@@ -375,8 +375,8 @@ lflow_run(struct controller_ctx *ctx, struct hmap *flow_table,
                     dst->clause = src->clause;
                     dst->n_clauses = src->n_clauses;
                 }
-                ofctrl_add_flow(flow_table, ptable, lflow->priority,
-                                &m->match, &conj);
+                ofctrl_add_flow_ctx(flow_table, ptable, lflow->priority,
+                                &m->match, &conj, ctx);
                 ofpbuf_uninit(&conj);
             }
         }

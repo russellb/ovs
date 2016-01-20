@@ -31,6 +31,7 @@
 #include "rconn.h"
 #include "socket-util.h"
 #include "vswitch-idl.h"
+#include "ovn/lib/ovn-sb-idl.h"
 
 VLOG_DEFINE_THIS_MODULE(ofctrl);
 
@@ -461,6 +462,30 @@ ofctrl_recv(const struct ofp_header *oh, enum ofptype type)
     }
 }
 
+/*
+ * We're seeing this error occur in the OpenStack CI jobs, so I'd like to see
+ * some details of the OVN databases when the error occurs.
+ */
+static void
+duplicate_flow_debug(struct controller_ctx *ctx)
+{
+    if (!ctx) {
+        VLOG_INFO("no controller_ctx");
+        return;
+    }
+
+    const struct sbrec_port_binding *pb;
+    SBREC_PORT_BINDING_FOR_EACH (pb, ctx->ovnsb_idl) {
+        VLOG_INFO("Port binding -- chassis:'%s' datapath:'%ld' lp:'%s' tunnel_key:'%ld' n_mac:'%ld'",
+                pb->chassis ? pb->chassis->name : "none", pb->datapath->tunnel_key,
+                pb->logical_port, pb->tunnel_key, pb->n_mac);
+        size_t i;
+        for (i = 0; i < pb->n_mac; i++) {
+            VLOG_INFO("Port binding mac: %s", pb->mac[i]);
+        }
+    }
+}
+
 /* Flow table interface to the rest of ovn-controller. */
 
 /* Adds a flow to 'desired_flows' with the specified 'match' and 'actions' to
@@ -471,10 +496,11 @@ ofctrl_recv(const struct ofp_header *oh, enum ofptype type)
  * sent to the switch until a later call to ofctrl_run().
  *
  * The caller should initialize its own hmap to hold the flows. */
-void
-ofctrl_add_flow(struct hmap *desired_flows,
+static void
+ofctrl_add_flow_(struct hmap *desired_flows,
                 uint8_t table_id, uint16_t priority,
-                const struct match *match, const struct ofpbuf *actions)
+                const struct match *match, const struct ofpbuf *actions,
+                struct controller_ctx *ctx)
 {
     struct ovn_flow *f = xmalloc(sizeof *f);
     f->table_id = table_id;
@@ -489,6 +515,7 @@ ofctrl_add_flow(struct hmap *desired_flows,
         if (!VLOG_DROP_INFO(&rl)) {
             char *s = ovn_flow_to_string(f);
             VLOG_INFO("dropping duplicate flow: %s", s);
+            duplicate_flow_debug(ctx);
             free(s);
         }
 
@@ -497,6 +524,23 @@ ofctrl_add_flow(struct hmap *desired_flows,
     }
 
     hmap_insert(desired_flows, &f->hmap_node, f->hmap_node.hash);
+}
+
+void
+ofctrl_add_flow(struct hmap *desired_flows,
+                uint8_t table_id, uint16_t priority,
+                const struct match *match, const struct ofpbuf *actions)
+{
+    ofctrl_add_flow_(desired_flows, table_id, priority, match, actions, NULL);
+}
+
+void
+ofctrl_add_flow_ctx(struct hmap *desired_flows,
+                uint8_t table_id, uint16_t priority,
+                const struct match *match, const struct ofpbuf *actions,
+                struct controller_ctx *ctx)
+{
+    ofctrl_add_flow_(desired_flows, table_id, priority, match, actions, ctx);
 }
 
 /* ovn_flow. */
