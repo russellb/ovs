@@ -86,7 +86,7 @@ class Idl(object):
       currently being constructed, if there is one, or None otherwise.
 """
 
-    def __init__(self, remote, schema):
+    def __init__(self, remote, schema, session=None):
         """Creates and returns a connection to the database named 'db_name' on
         'remote', which should be in a form acceptable to
         ovs.jsonrpc.session.open().  The connection will maintain an in-memory
@@ -104,7 +104,16 @@ class Idl(object):
         As a convenience to users, 'schema' may also be an instance of the
         SchemaHelper class.
 
-        The IDL uses and modifies 'schema' directly."""
+        The IDL uses and modifies 'schema' directly.
+
+        In passive mode ( where the OVSDB server connects to its manager ),
+        we first need to wait for the OVSDB server to connect and then
+        pass the 'session' object (while the it is still open ) and
+        the schema we retrieved from the open session to the IDL to use it.
+
+        If in active mode, do not pass 'session' and it will be created
+        by IDL by using 'remote'.
+        """
 
         assert isinstance(schema, SchemaHelper)
         schema = schema.get_idl_schema()
@@ -112,7 +121,10 @@ class Idl(object):
         self.tables = schema.tables
         self.readonly = schema.readonly
         self._db = schema
-        self._session = ovs.jsonrpc.Session.open(remote)
+        if session:
+            self._session = session
+        else:
+            self._session = ovs.jsonrpc.Session.open(remote)
         self._monitor_request_id = None
         self._last_seqno = None
         self.change_seqno = 0

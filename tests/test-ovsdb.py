@@ -407,17 +407,29 @@ def do_idl(schema_file, remote, *commands):
         commands = commands[1:]
     else:
         schema_helper.register_all()
-    idl = ovs.db.idl.Idl(remote, schema_helper)
 
-    if commands:
-        error, stream = ovs.stream.Stream.open_block(
-            ovs.stream.Stream.open(remote))
-        if error:
-            sys.stderr.write("failed to connect to \"%s\"" % remote)
-            sys.exit(1)
-        rpc = ovs.jsonrpc.Connection(stream)
+    passive = remote.startswith('ptcp')
+    if passive:
+        session = ovs.jsonrpc.Session.open(remote)
+        # first call to session.run creates the PassiveStream object and
+        # second one accept incoming connection
+        session.run()
+        session.run()
+
+        rpc = session.rpc
+        idl = ovs.db.idl.Idl(remote, schema_helper, session)
     else:
-        rpc = None
+        idl = ovs.db.idl.Idl(remote, schema_helper)
+
+        if commands:
+            error, stream = ovs.stream.Stream.open_block(
+                ovs.stream.Stream.open(remote))
+            if error:
+                sys.stderr.write("failed to connect to \"%s\"" % remote)
+                sys.exit(1)
+            rpc = ovs.jsonrpc.Connection(stream)
+        else:
+            rpc = None
 
     symtab = {}
     seqno = 0
@@ -475,14 +487,15 @@ def do_idl(schema_file, remote, *commands):
             sys.stdout.write("%s\n" % ovs.json.to_string(reply.to_json()))
             sys.stdout.flush()
 
-    if rpc:
-        rpc.close()
-    while idl.change_seqno == seqno and not idl.run():
-        poller = ovs.poller.Poller()
-        idl.wait(poller)
-        poller.block()
-    print_idl(idl, step)
-    step += 1
+    if not passive:
+        if rpc:
+            rpc.close()
+        while idl.change_seqno == seqno and not idl.run():
+            poller = ovs.poller.Poller()
+            idl.wait(poller)
+            poller.block()
+        print_idl(idl, step)
+        step += 1
     idl.close()
     print("%03d: done" % step)
 
