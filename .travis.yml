@@ -11,6 +11,10 @@ addons:
       - libssl-dev
       - llvm-dev
 
+python:
+  - 2.7
+  - 3.4
+
 before_install: ./.travis/prepare.sh
 
 before_script: export PATH=$PATH:$HOME/bin
