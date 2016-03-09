@@ -491,6 +491,35 @@
     </group>
   </table>
 
+  <table name="Address_Set" title="Address Sets">
+    <p>
+      Each row in this table represents a named set of addresses.
+      An address set may contain MAC, IPv4, or IPv6 addresses, but
+      a single address set must contain addresses all of the same type.
+    </p>
+
+    <p>
+      Address sets can be used in the <ref column="match" table="ACL"/> column
+      of the <ref table="ACL"/> table.  For syntax information, see the details
+      of the expression language used for the <ref column="match"
+      table="Logical_Flow" db="OVN_Southbound"/> column in the <ref
+      table="Logical_Flow" db="OVN_Southbound"/> table of the <ref
+      db="OVN_Southbound"/> database.
+    </p>
+
+    <column name="name">
+      <p>
+        A name for the address set.  This must be unique among all address sets.
+      </p>
+    </column>
+
+    <column name="addresses">
+      <p>
+        The set of addresses.
+      </p>
+    </column>
+  </table>
+
   <table name="ACL" title="Access Control List (ACL) rule">
     <p>
       Each row in this table represents one ACL rule for a logical switch
