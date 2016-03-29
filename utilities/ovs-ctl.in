@@ -167,7 +167,7 @@ do_start_ovsdb () {
         set "$@" --private-key=db:Open_vSwitch,SSL,private_key
         set "$@" --certificate=db:Open_vSwitch,SSL,certificate
         set "$@" --bootstrap-ca-cert=db:Open_vSwitch,SSL,ca_cert
-        start_daemon "$OVSDB_SERVER_PRIORITY" "$OVSDB_SERVER_WRAPPER" "$@" \
+        start_daemon "$OVSDB_SERVER_PRIORITY" "$OVSDB_SERVER_WRAPPER" "" "$@" \
             || return 1
 
         # Initialize database settings.
@@ -227,7 +227,7 @@ do_start_forwarding () {
 	    if test X"$MLOCKALL" != Xno; then
 	        set "$@" --mlockall
 	    fi
-	    start_daemon "$OVS_VSWITCHD_PRIORITY" "$OVS_VSWITCHD_WRAPPER" "$@"
+	    start_daemon "$OVS_VSWITCHD_PRIORITY" "$OVS_VSWITCHD_WRAPPER" "" "$@"
     fi
 }
 

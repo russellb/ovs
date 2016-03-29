@@ -101,14 +101,14 @@ start_northd () {
   else
       set ovn-northd
       set "$@" $OVN_NORTHD_LOG --ovnnb-db=unix:$DB_NB_SOCK --ovnsb-db=unix:$DB_SB_SOCK
-      OVS_RUNDIR=${OVN_RUNDIR} start_daemon "$OVN_NORTHD_PRIORITY" "$OVN_NORTHD_WRAPPER" "$@"
+      OVS_RUNDIR=${OVN_RUNDIR} start_daemon "$OVN_NORTHD_PRIORITY" "$OVN_NORTHD_WRAPPER" "$FOREGROUND" "$@"
   fi
 }
 
 start_controller () {
     set ovn-controller "unix:$DB_SOCK"
     set "$@" -vconsole:emer -vsyslog:err -vfile:info
-    OVS_RUNDIR=${OVN_RUNDIR} start_daemon "$OVN_CONTROLLER_PRIORITY" "$OVN_CONTROLLER_WRAPPER" "$@"
+    OVS_RUNDIR=${OVN_RUNDIR} start_daemon "$OVN_CONTROLLER_PRIORITY" "$OVN_CONTROLLER_WRAPPER" "$FOREGROUND" "$@"
 }
 
 ## ---- ##
@@ -183,6 +183,8 @@ set_defaults () {
     OVN_SB_LOG="-vconsole:off"
     OVN_NB_LOGFILE="$logdir/ovsdb-server-nb.log"
     OVN_SB_LOGFILE="$logdir/ovsdb-server-sb.log"
+
+    FOREGROUND=no
 }
 
 set_option () {
@@ -233,6 +235,7 @@ Options:
   --ovn-northd-log=STRING            ovn northd process logging params (default: $OVN_NORTHD_LOG)
   --ovn-nb-log=STRING             ovn NB ovsdb-server processes logging params (default: $OVN_NB_LOG)
   --ovn-sb-log=STRING             ovn SB ovsdb-server processes logging params (default: $OVN_SB_LOG)
+  --foreground                   Keep daemons in the foreground.
   -h, --help                     display this help message
 
 File location options:
