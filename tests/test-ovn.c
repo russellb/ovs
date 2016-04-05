@@ -238,6 +238,26 @@ create_symtab(struct shash *symtab)
     expr_symtab_add_string(symtab, "big_string", MFF_XREG0, NULL);
 }
 
+static void
+create_address_sets(struct shash *address_sets)
+{
+    shash_init(address_sets);
+
+    const char * const addrs1[] = {
+        "10.0.0.1", "10.0.0.2", "10.0.0.3",
+    };
+    const char * const addrs2[] = {
+        "::1", "::2", "::3",
+    };
+    const char * const addrs3[] = {
+        "00:00:00:00:00:01", "00:00:00:00:00:02", "00:00:00:00:00:03",
+    };
+
+    expr_address_sets_add(address_sets, "set1", addrs1, 3);
+    expr_address_sets_add(address_sets, "set2", addrs2, 3);
+    expr_address_sets_add(address_sets, "set3", addrs3, 3);
+}
+
 static bool
 lookup_port_cb(const void *ports_, const char *port_name, unsigned int *portp)
 {
@@ -254,10 +274,12 @@ static void
 test_parse_expr__(int steps)
 {
     struct shash symtab;
+    struct shash address_sets;
     struct simap ports;
     struct ds input;
 
     create_symtab(&symtab);
+    create_address_sets(&address_sets);
 
     simap_init(&ports);
     simap_put(&ports, "eth0", 5);
@@ -269,7 +291,8 @@ test_parse_expr__(int steps)
         struct expr *expr;
         char *error;
 
-        expr = expr_parse_string(ds_cstr(&input), &symtab, &error);
+        expr = expr_parse_string(ds_cstr(&input), &symtab, &address_sets,
+                                 &error);
         if (!error && steps > 0) {
             expr = expr_annotate(expr, &symtab, &error);
         }
@@ -306,6 +329,8 @@ test_parse_expr__(int steps)
     simap_destroy(&ports);
     expr_symtab_destroy(&symtab);
     shash_destroy(&symtab);
+    expr_address_sets_destroy(&address_sets);
+    shash_destroy(&address_sets);
 }
 
 static void
@@ -450,7 +475,7 @@ test_evaluate_expr(struct ovs_cmdl_context *ctx)
         struct expr *expr;
         char *error;
 
-        expr = expr_parse_string(ds_cstr(&input), &symtab, &error);
+        expr = expr_parse_string(ds_cstr(&input), &symtab, NULL, &error);
         if (!error) {
             expr = expr_annotate(expr, &symtab, &error);
         }
@@ -924,7 +949,7 @@ test_tree_shape_exhaustively(struct expr *expr, struct shash *symtab,
             expr_format(expr, &s);
 
             char *error;
-            modified = expr_parse_string(ds_cstr(&s), symtab, &error);
+            modified = expr_parse_string(ds_cstr(&s), symtab, NULL, &error);
             if (error) {
                 fprintf(stderr, "%s fails to parse (%s)\n",
                         ds_cstr(&s), error);

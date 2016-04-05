@@ -343,8 +343,10 @@ expr_from_node(const struct ovs_list *node)
 void expr_format(const struct expr *, struct ds *);
 void expr_print(const struct expr *);
 struct expr *expr_parse(struct lexer *, const struct shash *symtab,
+                        const struct shash *address_sets,
                         char **errorp);
 struct expr *expr_parse_string(const char *, const struct shash *symtab,
+                               const struct shash *address_sets,
                                char **errorp);
 
 struct expr *expr_clone(struct expr *);
@@ -390,5 +392,18 @@ char *expr_parse_assignment(struct lexer *lexer, const struct shash *symtab,
 char *expr_parse_field(struct lexer *, int n_bits, bool rw,
                        const struct shash *symtab, struct mf_subfield *,
                        struct expr **prereqsp);
+
+
+/* Address sets.
+ *
+ * Instead of referring to a set of addresses as:
+ *    {addr1, addr2, ..., addrN}
+ * You can register a set of addresses and refer to them as:
+ *    address_set(<name>)
+ */
+void expr_address_sets_add(struct shash *address_sets, const char *name,
+                           const char * const *addresses, size_t n_addresses);
+void expr_address_sets_remove(struct shash *address_sets, const char *name);
+void expr_address_sets_destroy(struct shash *address_sets);
 
 #endif /* ovn/expr.h */

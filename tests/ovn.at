@@ -434,6 +434,42 @@ AT_CHECK([expr_to_flow 'inport == "eth0" && inport == "eth1"'], [0], [dnl
 ])
 AT_CLEANUP
 
+AT_SETUP([ovn -- converting expressions to flows -- address sets])
+expr_to_flow () {
+    echo "$1" | ovstest test-ovn expr-to-flows | sort
+}
+AT_CHECK([expr_to_flow 'ip4.src == {10.0.0.1, 10.0.0.2, 10.0.0.3}'], [0], [dnl
+ip,nw_src=10.0.0.1
+ip,nw_src=10.0.0.2
+ip,nw_src=10.0.0.3
+])
+AT_CHECK([expr_to_flow 'ip4.src == address_set(set1)'], [0], [dnl
+ip,nw_src=10.0.0.1
+ip,nw_src=10.0.0.2
+ip,nw_src=10.0.0.3
+])
+AT_CHECK([expr_to_flow 'ip6.src == {::1, ::2, ::3}'], [0], [dnl
+ipv6,ipv6_src=::1
+ipv6,ipv6_src=::2
+ipv6,ipv6_src=::3
+])
+AT_CHECK([expr_to_flow 'ip6.src == address_set(set2)'], [0], [dnl
+ipv6,ipv6_src=::1
+ipv6,ipv6_src=::2
+ipv6,ipv6_src=::3
+])
+AT_CHECK([expr_to_flow 'eth.src == {00:00:00:00:00:01, 00:00:00:00:00:02, 00:00:00:00:00:03}'], [0], [dnl
+dl_src=00:00:00:00:00:01
+dl_src=00:00:00:00:00:02
+dl_src=00:00:00:00:00:03
+])
+AT_CHECK([expr_to_flow 'eth.src == address_set(set3)'], [0], [dnl
+dl_src=00:00:00:00:00:01
+dl_src=00:00:00:00:00:02
+dl_src=00:00:00:00:00:03
+])
+AT_CLEANUP
+
 AT_SETUP([ovn -- action parsing])
 dnl Text before => is input, text after => is expected output.
 AT_DATA([test-cases.txt], [[

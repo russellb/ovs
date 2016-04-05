@@ -450,6 +450,7 @@ struct expr_field {
 struct expr_context {
     struct lexer *lexer;        /* Lexer for pulling more tokens. */
     const struct shash *symtab; /* Symbol table. */
+    const struct shash *address_sets; /* Table of address sets. */
     char *error;                /* Error, if any, otherwise NULL. */
     bool not;                   /* True inside odd number of NOT operators. */
 };
@@ -807,6 +808,61 @@ parse_constant(struct expr_context *ctx, struct expr_constant_set *cs,
     }
 }
 
+static bool
+parse_address_set(struct expr_context *ctx, struct expr_constant_set *cs)
+{
+    if (!ctx->address_sets) {
+        expr_syntax_error(ctx, "No address sets defined.");
+        return false;
+    }
+
+    if (!lexer_match(ctx->lexer, LEX_T_LPAREN)) {
+        expr_syntax_error(ctx, "Expecting '(' after 'address_set'");
+        return false;
+    }
+
+    if (ctx->lexer->token.type != LEX_T_ID) {
+        expr_syntax_error(ctx, "Expecting name after 'address_set('");
+        return false;
+    }
+
+    bool ok = true;
+    char *name = xstrdup(ctx->lexer->token.s);
+    lexer_get(ctx->lexer);
+
+    if (!lexer_match(ctx->lexer, LEX_T_RPAREN)) {
+        expr_syntax_error(ctx, "Expecting ')' after 'address_set(<name>'");
+        ok = false;
+        goto cleanup;
+    }
+
+    struct expr_constant_set *addr_set
+        = shash_find_data(ctx->address_sets, name);
+    if (!name) {
+        expr_syntax_error(ctx, "Unknown address set: '%s'", name);
+        ok = false;
+        goto cleanup;
+    }
+
+    cs->type = EXPR_C_INTEGER;
+    cs->in_curlies = true;
+    cs->n_values = addr_set->n_values;
+    cs->values = xmalloc(cs->n_values * sizeof *cs->values);
+    size_t i;
+    for (i = 0; i < cs->n_values; i++) {
+        union expr_constant *c1 = &cs->values[i];
+        union expr_constant *c2 = &addr_set->values[i];
+        c1->value = c2->value;
+        c1->format = c2->format;
+        c1->masked = c2->masked;
+        c1->mask = c2->mask;
+    }
+
+cleanup:
+    free(name);
+    return ok;
+}
+
 /* Parses a single or {}-enclosed set of integer or string constants into 'cs',
  * which the caller need not have initialized.  Returns true on success, in
  * which case the caller owns 'cs', false on failure, in which case 'cs' is
@@ -818,7 +874,9 @@ parse_constant_set(struct expr_context *ctx, struct expr_constant_set *cs)
     bool ok;
 
     memset(cs, 0, sizeof *cs);
-    if (lexer_match(ctx->lexer, LEX_T_LCURLY)) {
+    if (lexer_match_id(ctx->lexer, "address_set")) {
+        ok = parse_address_set(ctx, cs);
+    } else if (lexer_match(ctx->lexer, LEX_T_LCURLY)) {
         ok = true;
         cs->in_curlies = true;
         do {
@@ -847,6 +905,72 @@ expr_constant_set_destroy(struct expr_constant_set *cs)
             }
         }
         free(cs->values);
+    }
+}
+
+void
+expr_address_sets_add(struct shash *address_sets, const char *name,
+                      const char * const *addresses, size_t n_addresses)
+{
+    /* Replace any existing entry for this name. */
+    expr_address_sets_remove(address_sets, name);
+
+    struct expr_constant_set *cset = xzalloc(sizeof *cset);
+    cset->type = EXPR_C_INTEGER;
+    cset->in_curlies = true;
+    cset->n_values = n_addresses;
+    cset->values = xmalloc(cset->n_values * sizeof *cset->values);
+    size_t i, errors = 0;
+    for (i = 0; i < n_addresses; i++) {
+        /* Use the lexer to convert each address into the proper
+         * integer format. */
+        struct lexer lex;
+        lexer_init(&lex, addresses[i]);
+        lexer_get(&lex);
+        if (lex.token.type != LEX_T_INTEGER
+            && lex.token.type != LEX_T_MASKED_INTEGER) {
+            VLOG_WARN("Invalid address set entry: '%s', token type: %d",
+                      addresses[i], lex.token.type);
+            errors += 1;
+        } else {
+            union expr_constant *c = &cset->values[i - errors];
+            c->value = lex.token.value;
+            c->format = lex.token.format;
+            c->masked = lex.token.type == LEX_T_MASKED_INTEGER;
+            if (c->masked) {
+                c->mask = lex.token.mask;
+            }
+        }
+        lexer_destroy(&lex);
+    }
+    cset->n_values -= errors;
+
+    shash_add(address_sets, name, cset);
+}
+
+void
+expr_address_sets_remove(struct shash *address_sets, const char *name)
+{
+    struct expr_constant_set *cset
+        = shash_find_and_delete(address_sets, name);
+
+    if (cset) {
+        expr_constant_set_destroy(cset);
+        free(cset);
+    }
+}
+
+/* Destroy all contents of address_sets. */
+void
+expr_address_sets_destroy(struct shash *address_sets)
+{
+    struct shash_node *node, *next;
+
+    SHASH_FOR_EACH_SAFE (node, next, address_sets) {
+        struct expr_constant_set *cset = node->data;
+
+        shash_delete(address_sets, node);
+        expr_constant_set_destroy(cset);
     }
 }
 
@@ -1022,12 +1146,14 @@ expr_parse__(struct expr_context *ctx)
  * The caller must eventually free the returned expression (with
  * expr_destroy()) or error (with free()). */
 struct expr *
-expr_parse(struct lexer *lexer, const struct shash *symtab, char **errorp)
+expr_parse(struct lexer *lexer, const struct shash *symtab,
+           const struct shash *address_sets, char **errorp)
 {
     struct expr_context ctx;
 
     ctx.lexer = lexer;
     ctx.symtab = symtab;
+    ctx.address_sets = address_sets;
     ctx.error = NULL;
     ctx.not = false;
 
@@ -1039,14 +1165,15 @@ expr_parse(struct lexer *lexer, const struct shash *symtab, char **errorp)
 
 /* Like expr_parse(), but the expression is taken from 's'. */
 struct expr *
-expr_parse_string(const char *s, const struct shash *symtab, char **errorp)
+expr_parse_string(const char *s, const struct shash *symtab,
+                  const struct shash *address_sets, char **errorp)
 {
     struct lexer lexer;
     struct expr *expr;
 
     lexer_init(&lexer, s);
     lexer_get(&lexer);
-    expr = expr_parse(&lexer, symtab, errorp);
+    expr = expr_parse(&lexer, symtab, address_sets, errorp);
     if (!*errorp && lexer.token.type != LEX_T_END) {
         *errorp = xstrdup("Extra tokens at end of input.");
         expr_destroy(expr);
@@ -1202,7 +1329,7 @@ expr_get_level(const struct expr *expr)
 static enum expr_level
 expr_parse_level(const char *s, const struct shash *symtab, char **errorp)
 {
-    struct expr *expr = expr_parse_string(s, symtab, errorp);
+    struct expr *expr = expr_parse_string(s, symtab, NULL, errorp);
     enum expr_level level = expr ? expr_get_level(expr) : EXPR_L_NOMINAL;
     expr_destroy(expr);
     return level;
@@ -1345,7 +1472,7 @@ parse_and_annotate(const char *s, const struct shash *symtab,
     char *error;
     struct expr *expr;
 
-    expr = expr_parse_string(s, symtab, &error);
+    expr = expr_parse_string(s, symtab, NULL, &error);
     if (expr) {
         expr = expr_annotate__(expr, symtab, nesting, &error);
     }
