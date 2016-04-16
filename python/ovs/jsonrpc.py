@@ -429,23 +429,25 @@ class Session(object):
         self.__disconnect()
 
         name = self.reconnect.get_name()
-        if not self.reconnect.is_passive():
-            error, self.stream = ovs.stream.Stream.open(name)
-            if not error:
-                self.reconnect.connecting(ovs.timeval.msec())
-            else:
-                self.reconnect.connect_failed(ovs.timeval.msec(), error)
-        elif self.pstream is not None:
+        if self.reconnect.is_passive():
+            if self.pstream is not None:
+                self.pstream.close()
             error, self.pstream = ovs.stream.PassiveStream.open(name)
             if not error:
                 self.reconnect.listening(ovs.timeval.msec())
+            else:
+                self.reconnect.connect_failed(ovs.timeval.msec(), error)
+        else:
+            error, self.stream = ovs.stream.Stream.open(name)
+            if not error:
+                self.reconnect.connecting(ovs.timeval.msec())
             else:
                 self.reconnect.connect_failed(ovs.timeval.msec(), error)
 
         self.seqno += 1
 
     def run(self):
-        if self.pstream is not None:
+        if self.pstream is not None and self.stream is None:
             error, stream = self.pstream.accept()
             if error == 0:
                 if self.rpc or self.stream:
@@ -455,11 +457,11 @@ class Session(object):
                     self.__disconnect()
                 self.reconnect.connected(ovs.timeval.msec())
                 self.rpc = Connection(stream)
+                self.stream = stream
             elif error != errno.EAGAIN:
                 self.reconnect.listen_error(ovs.timeval.msec(), error)
                 self.pstream.close()
                 self.pstream = None
-
         if self.rpc:
             backlog = self.rpc.get_backlog()
             self.rpc.run()

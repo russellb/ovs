@@ -284,22 +284,32 @@ class PassiveStream(object):
     def open(name):
         """Attempts to start listening for remote stream connections.  'name'
         is a connection name in the form "TYPE:ARGS", where TYPE is an passive
-        stream class's name and ARGS are stream class-specific.  Currently the
-        only supported TYPE is "punix".
+        stream class's name and ARGS are stream class-specific. Currently the
+        supported values for TYPE are "punix" and "ptcp".
 
         Returns (error, pstream): on success 'error' is 0 and 'pstream' is the
         new PassiveStream, on failure 'error' is a positive errno value and
         'pstream' is None."""
         if not PassiveStream.is_valid_name(name):
             return errno.EAFNOSUPPORT, None
-
-        bind_path = name[6:]
+        bind_path = None
         if name.startswith("punix:"):
+            bind_path = name[6:]
             bind_path = ovs.util.abs_file_name(ovs.dirs.RUNDIR, bind_path)
-        error, sock = ovs.socket_util.make_unix_socket(socket.SOCK_STREAM,
-                                                       True, bind_path, None)
-        if error:
-            return error, None
+            error, sock = ovs.socket_util.make_unix_socket(socket.SOCK_STREAM,
+                                                           True, bind_path,
+                                                           None)
+            if error:
+                return error, None
+
+        elif name.startswith("ptcp:"):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            remote = name.split(':')
+            sock.bind((remote[1], int(remote[2])))
+
+        else:
+            raise Exception('Unknown connection string')
 
         try:
             sock.listen(10)
@@ -330,7 +340,10 @@ class PassiveStream(object):
             try:
                 sock, addr = self.socket.accept()
                 ovs.socket_util.set_nonblocking(sock)
-                return 0, Stream(sock, "unix:%s" % addr, 0)
+                if (sock.family == socket.AF_UNIX):
+                    return 0, Stream(sock, "unix:%s" % addr, 0)
+                return 0, Stream(sock, 'ptcp:%s:%s' % (addr[0],
+                                                       str(addr[1])), 0)
             except socket.error as e:
                 error = ovs.socket_util.get_exception_errno(e)
                 if error != errno.EAGAIN:
