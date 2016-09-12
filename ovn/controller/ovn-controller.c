@@ -230,7 +230,8 @@ get_ovnsb_remote(struct ovsdb_idl *ovs_idl)
 }
 
 static void
-update_ct_zones(struct sset *lports, struct hmap *patched_datapaths,
+update_ct_zones(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
+                struct sset *lports, struct hmap *patched_datapaths,
                 struct simap *ct_zones, unsigned long *ct_zone_bitmap)
 {
     struct simap_node *ct_zone, *ct_zone_next;
@@ -288,6 +289,33 @@ update_ct_zones(struct sset *lports, struct hmap *patched_datapaths,
 
         bitmap_set1(ct_zone_bitmap, zone);
         simap_put(ct_zones, user, zone);
+
+        /* A new ct zone ID has been assigned.  We need to remember this
+         * assignment to ensure that consistent assignment is done after
+         * an ovn-controller restart. */
+        if (sset_contains(lports, user)) {
+            /* A logical port. */
+            binding_set_ct_zone(ctx, br_int, user, zone);
+        } else {
+            /* A patched datapath. 'user' will be in the form
+             * <UUID>_snat or <UUID>_dnat.
+             *
+             * XXX converting from a string back to patch_datapath
+             * seems pretty hacky ... should consider refactoring. */
+            struct uuid pd_uuid;
+            if (!uuid_from_string_prefix(&pd_uuid, user)) {
+                continue;
+            }
+            bool snat = strstr(user, "_snat") ? true : false;
+            HMAP_FOR_EACH(pd, hmap_node, patched_datapaths) {
+                if (uuid_equals(&pd_uuid, &pd->key)) {
+                    break;
+                }
+            }
+            if (pd) {
+                patch_set_ct_zone(ctx, pd, snat, zone);
+            }
+        }
 
         /* xxx We should erase any old entries for this
          * xxx zone, but we need a generic interface to the conntrack
@@ -379,11 +407,28 @@ main(int argc, char *argv[])
 
     ovsdb_idl_get_initial_snapshot(ovnsb_idl_loop.idl);
 
-    /* Initialize connection tracking zones. */
+    /* Initialize connection tracking zones.
+     *
+     * ct_zones is a map between names and ct zone IDs. The name
+     * may be in one of two forms:
+     *
+     *   1. logical port name.
+     *   2. <UUID>_snat or <UUID>_dnat. These correspond to the two
+     *      ct zones allocated for logical router datapaths where
+     *      the router is bound to this chassis.  The UUID is the
+     *      datapath UUID.
+     *
+     * ct_zone_bitmap is used to keep track of which ct zone IDs
+     * are currently in use.  Bit N of the bitmap corresponds to
+     * a ct zone ID of N.
+     */
     struct simap ct_zones = SIMAP_INITIALIZER(&ct_zones);
     unsigned long ct_zone_bitmap[BITMAP_N_LONGS(MAX_CT_ZONES)];
     memset(ct_zone_bitmap, 0, sizeof ct_zone_bitmap);
     bitmap_set1(ct_zone_bitmap, 0); /* Zone 0 is reserved. */
+    /* XXX restore previously assigned zones */
+    binding_restore_ct_zones();
+    patch_restore_ct_zones();
     unixctl_command_register("ct-zone-list", "", 0, 0,
                              ct_zone_list, &ct_zones);
 
@@ -439,8 +484,8 @@ main(int argc, char *argv[])
             enum mf_field_id mff_ovn_geneve = ofctrl_run(br_int);
 
             pinctrl_run(&ctx, &lports, br_int, chassis_id, &local_datapaths);
-            update_ct_zones(&all_lports, &patched_datapaths, &ct_zones,
-                            ct_zone_bitmap);
+            update_ct_zones(&ctx, br_int, &all_lports, &patched_datapaths,
+                            &ct_zones, ct_zone_bitmap);
 
             struct hmap flow_table = HMAP_INITIALIZER(&flow_table);
             lflow_run(&ctx, &lports, &mcgroups, &local_datapaths,

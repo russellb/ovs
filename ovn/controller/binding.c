@@ -191,6 +191,24 @@ consider_local_datapath(struct controller_ctx *ctx,
 }
 
 void
+binding_set_ct_zone(struct controller_ctx *ctx OVS_UNUSED, const struct ovsrec_bridge *br_int OVS_UNUSED,
+                    const char *lport OVS_UNUSED, unsigned int zone OVS_UNUSED)
+{
+    /* XXX
+     *  - normal vif
+     *  - sub-port
+     *  - localnet port (won't have iface-id set)
+     *  - l2gateway port (won't have iface-id set)
+     */
+}
+
+void
+binding_restore_ct_zones(void)
+{
+    /* XXX */
+}
+
+void
 binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
             const char *chassis_id, struct hmap *local_datapaths,
             struct sset *all_lports)

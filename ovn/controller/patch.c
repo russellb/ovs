@@ -374,6 +374,19 @@ add_logical_patch_ports(struct controller_ctx *ctx,
 }
 
 void
+patch_set_ct_zone(struct controller_ctx *ctx OVS_UNUSED, struct patched_datapath *pd OVS_UNUSED,
+                  bool snat OVS_UNUSED, unsigned int zone OVS_UNUSED)
+{
+    /* XXX */
+}
+
+void
+patch_restore_ct_zones(void)
+{
+    /* XXX */
+}
+
+void
 patch_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
           const char *chassis_id, struct hmap *local_datapaths,
           struct hmap *patched_datapaths)

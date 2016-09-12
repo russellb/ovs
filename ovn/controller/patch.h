@@ -16,6 +16,8 @@
 #ifndef OVN_PATCH_H
 #define OVN_PATCH_H 1
 
+#include <stdbool.h>
+
 /* Patch Ports
  * ===========
  *
@@ -25,9 +27,13 @@
 struct controller_ctx;
 struct hmap;
 struct ovsrec_bridge;
+struct patched_datapath;
 
 void patch_run(struct controller_ctx *, const struct ovsrec_bridge *br_int,
                const char *chassis_id, struct hmap *local_datapaths,
                struct hmap *patched_datapaths);
+void patch_set_ct_zone(struct controller_ctx *, struct patched_datapath *pd,
+                       bool snat, unsigned int zone);
+void patch_restore_ct_zones(void);
 
 #endif /* ovn/patch.h */
