@@ -433,20 +433,10 @@ consider_local_datapath(struct controller_ctx *ctx,
                                                        chassis_index);
         if (gateway_chassis &&
             gateway_chassis_contains(gateway_chassis, chassis_rec)) {
-            struct gateway_chassis *gwc;
-            LIST_FOR_EACH (gwc, node, gateway_chassis) {
-                if (!gwc->db->chassis) {
-                    continue;
-                }
-                if (!strcmp(gwc->db->chassis->name, chassis_rec->name)) {
-                    /* sb_rec_port_binding->chassis should reflect master */
-                    our_chassis = true;
-                    break;
-                }
-                if (sset_contains(active_tunnels, gwc->db->chassis->name)) {
-                    break;
-                }
-            }
+
+            our_chassis = gateway_chassis_is_active(
+                gateway_chassis, chassis_rec, active_tunnels);
+
             add_local_datapath(ldatapaths, lports, binding_rec->datapath,
                                false, local_datapaths, our_chassis);
         }
@@ -498,7 +488,8 @@ binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
             const struct ldatapath_index *ldatapaths,
             const struct lport_index *lports,
             const struct chassis_index *chassis_index,
-            struct hmap *local_datapaths, struct sset *local_lports)
+            struct hmap *local_datapaths, struct sset *local_lports,
+            struct sset *active_tunnels)
 {
     if (!chassis_rec) {
         return;
@@ -507,13 +498,12 @@ binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
     const struct sbrec_port_binding *binding_rec;
     struct shash lport_to_iface = SHASH_INITIALIZER(&lport_to_iface);
     struct sset egress_ifaces = SSET_INITIALIZER(&egress_ifaces);
-    struct sset active_tunnels = SSET_INITIALIZER(&active_tunnels);
     struct hmap qos_map;
 
     hmap_init(&qos_map);
     if (br_int) {
         get_local_iface_ids(br_int, &lport_to_iface, local_lports,
-                            &egress_ifaces, &active_tunnels);
+                            &egress_ifaces, active_tunnels);
     }
 
     /* Run through each binding record to see if it is resident on this
@@ -524,7 +514,7 @@ binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
                                 chassis_rec, binding_rec,
                                 sset_is_empty(&egress_ifaces) ? NULL :
                                 &qos_map, local_datapaths, &lport_to_iface,
-                                local_lports, &active_tunnels);
+                                local_lports, active_tunnels);
 
     }
     if (!sset_is_empty(&egress_ifaces)
@@ -537,7 +527,6 @@ binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
 
     shash_destroy(&lport_to_iface);
     sset_destroy(&egress_ifaces);
-    sset_destroy(&active_tunnels);
     hmap_destroy(&qos_map);
 }
 
