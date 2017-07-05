@@ -1837,6 +1837,13 @@ tcp.flags = RST;
 
       </column>
 
+      <column name="gateway_chassis">
+        The list of <ref table="Gateway_Chassis"/> should only be populated for
+        ports of type <code>chassisredirect</code>. And defines the list
+        of chassis which outgoing traffic of the port will be redirected
+        through.
+      </column>
+
       <column name="tunnel_key">
         <p>
           A number that represents the logical port in the key (e.g. STT key or
@@ -2882,5 +2889,36 @@ tcp.flags = RST;
         Set of strings identifying columns and column:key pairs that authorized
         clients are allowed to modify.
     </column>
+  </table>
+  <table name="Gateway_Chassis">
+    Association of Port_Binding of type <code>chassisredirect</code> to
+    a Chassis. The traffic going out through an specific chassisredirect
+    port will be redirected to a chassis, or a set of them in high
+    availability configurations.
+
+    <column name="name">
+      Name of the Gateway Chassis element, a recommendation
+      is using ${port_name}_${chassis_name}
+    </column>
+
+    <column name="chassis">
+      The <ref table="Chassis"/> to which we send the traffic.
+    </column>
+
+    <column name="priority">
+      This is the priority the specific <ref table="Chassis"/> among all
+      Gateway_Chassis belonging to the same logical router port.
+    </column>
+
+    <column name="options">
+      Reserved for future use.
+    </column>
+
+    <group title="Common Columns">
+      The overall purpose of these columns is described under <code>Common
+      Columns</code> at the beginning of this document.
+
+      <column name="external_ids"/>
+    </group>
   </table>
 </database>

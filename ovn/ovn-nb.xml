@@ -1250,6 +1250,11 @@
       </p>
     </column>
 
+    <column name="gateway_chassis">
+      Several <ref table="Gateway_Chassis"/> can be referenced for a given
+      logical router port.
+    </column>
+
     <column name="networks">
       <p>
         The IP addresses and netmasks of the router.  For example,
@@ -2111,4 +2116,38 @@
       <column name="external_ids"/>
     </group>
   </table>
+  <table name="Gateway_Chassis">
+    Association of chassis to logical router port. The traffic
+    going out through an specific router port will be redirected to a
+    chassis, or a set of them in high availability configurations.
+    This is the equivalent of option:redirect-chassis for Logical
+    Router ports, but allowing the association and prioritize multiple
+    Chassis to a single port.
+
+    <column name="name">
+      Name of the Gateway Chassis element, a recommendation
+      is using ${port_name}_${chassis_name}
+    </column>
+
+    <column name="chassis_name">
+      Name of the chassis that we want to use to traffic going
+      through an specific logical router port
+    </column>
+
+    <column name="priority">
+      This is the priority of a chassis among all Gateway_Chassis belonging
+      to the same logical router port.
+    </column>
+
+    <column name="options">
+      Reserved for future use.
+    </column>
+
+    <group title="Common Columns">
+      The overall purpose of these columns is described under <code>Common
+      Columns</code> at the beginning of this document.
+      <column name="external_ids"/>
+    </group>
+  </table>
+
 </database>
