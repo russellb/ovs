@@ -7496,3 +7496,55 @@ done
 OVN_CLEANUP([hv1],[hv2])
 
 AT_CLEANUP
+
+AT_SETUP([ovn -- check Gateway_Chassis propagation from NBDB to SBDB])
+AT_SKIP_IF([test $HAVE_PYTHON = no])
+ovn_start
+
+ovn-nbctl create Logical_Router name=R1
+ovn-sbctl chassis-add gw1 geneve 127.0.0.1
+ovn-sbctl chassis-add gw2 geneve 1.2.4.8
+
+# Connect alice to R1 as distributed router gateway port on hv2
+ovn-nbctl lrp-add R1 alice 00:00:02:01:02:03 172.16.1.1/24
+
+
+ovn-nbctl \
+    --id=@gc0 create Gateway_Chassis name=alice_gw1 \
+                                     chassis_name=gw1 \
+                                     priority=20 -- \
+    --id=@gc1 create Gateway_Chassis name=alice_gw2 \
+                                     chassis_name=gw2 \
+                                     priority=10 -- \
+    set Logical_Router_Port alice 'gateway_chassis=[@gc0,@gc1]'
+
+
+# Allow some time for ovn-northd and ovn-controller to catch up.
+# XXX This should be more systematic.
+ovn-nbctl --wait=sb sync
+sleep 2
+
+gwc1_uuid=`ovn-sbctl --bare --columns _uuid find Gateway_Chassis name="alice_gw1"`
+gwc2_uuid=`ovn-sbctl --bare --columns _uuid find Gateway_Chassis name="alice_gw2"`
+
+AT_CHECK([ovn-sbctl --bare --columns gateway_chassis find port_binding logical_port="cr-alice" | grep $gwc1_uuid | wc -l], [0], [1
+])
+AT_CHECK([ovn-sbctl --bare --columns gateway_chassis find port_binding logical_port="cr-alice" | grep $gwc2_uuid | wc -l], [0], [1
+])
+
+# Create Logical_Router_Port with redirect-chassis option
+ovn-nbctl lrp-del alice
+ovn-nbctl lrp-add R1 alice 00:00:02:01:02:03 172.16.1.1/24 \
+    -- set Logical_Router_Port alice options:redirect-chassis="gw1"
+ovn-nbctl --wait=sb sync
+
+# It should be converted to Gateway_Chassis entries in SBDB, and
+# still redirect-chassis is kept for backwards compatibility
+
+gwc1_uuid=`ovn-sbctl --bare --columns _uuid find Gateway_Chassis name="alice_gw1"`
+AT_CHECK([ovn-sbctl --bare --columns gateway_chassis find port_binding logical_port="cr-alice" | grep $gwc1_uuid | wc -l], [0], [1
+])
+AT_CHECK([ovn-sbctl --bare --columns options find port_binding logical_port="cr-alice" | grep 'redirect-chassis=gw1' | wc -l], [0], [1
+])
+AT_CLEANUP
+
