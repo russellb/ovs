@@ -502,6 +502,8 @@ ctrl_register_ovs_idl(struct ovsdb_idl *ovs_idl)
     ovsdb_idl_add_column(ovs_idl, &ovsrec_open_vswitch_col_bridges);
     ovsdb_idl_add_table(ovs_idl, &ovsrec_table_interface);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_name);
+    ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_bfd);
+    ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_bfd_status);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_type);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_options);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_ofport);
@@ -640,7 +642,7 @@ main(int argc, char *argv[])
             chassis = chassis_run(&ctx, chassis_id, br_int);
             encaps_run(&ctx, br_int, chassis_id);
             binding_run(&ctx, br_int, chassis, &ldatapaths, &lports,
-                        &local_datapaths, &local_lports);
+                        &chassis_index, &local_datapaths, &local_lports);
         }
 
         if (br_int && chassis) {
@@ -664,6 +666,8 @@ main(int argc, char *argv[])
                               &local_datapaths, &group_table,
                               &addr_sets, &flow_table);
 
+                    bfd_run(&ctx, br_int, chassis, &local_datapaths,
+                            &chassis_index);
                     physical_run(&ctx, mff_ovn_geneve,
                                  br_int, chassis, &ct_zones, &lports,
                                  &flow_table, &local_datapaths, &local_lports,
@@ -719,6 +723,7 @@ main(int argc, char *argv[])
 
         struct local_datapath *cur_node, *next_node;
         HMAP_FOR_EACH_SAFE (cur_node, next_node, hmap_node, &local_datapaths) {
+            free(cur_node->peer_dps);
             hmap_remove(&local_datapaths, &cur_node->hmap_node);
             free(cur_node);
         }

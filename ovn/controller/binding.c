@@ -60,6 +60,8 @@ binding_register_ovs_idl(struct ovsdb_idl *ovs_idl)
     ovsdb_idl_add_table(ovs_idl, &ovsrec_table_interface);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_name);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_external_ids);
+    ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_bfd);
+    ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_bfd_status);
     ovsdb_idl_add_column(ovs_idl, &ovsrec_interface_col_status);
 
     ovsdb_idl_add_table(ovs_idl, &ovsrec_table_qos);
@@ -70,7 +72,8 @@ static void
 get_local_iface_ids(const struct ovsrec_bridge *br_int,
                     struct shash *lport_to_iface,
                     struct sset *local_lports,
-                    struct sset *egress_ifaces)
+                    struct sset *egress_ifaces,
+                    struct sset *active_tunnels)
 {
     int i;
 
@@ -102,6 +105,20 @@ get_local_iface_ids(const struct ovsrec_bridge *br_int,
                 if (tunnel_iface) {
                     sset_add(egress_ifaces, tunnel_iface);
                 }
+                /* Add ovn-chassis-id if the bfd_status of the tunnel
+                 * is active */
+                const char *bfd = smap_get(&iface_rec->bfd, "enable");
+                if (bfd && !strcmp(bfd, "true")) {
+                    const char *status = smap_get(&iface_rec->bfd_status,
+                                                  "state");
+                    if (status && !strcmp(status, "up")) {
+                        const char *id = smap_get(&port_rec->external_ids,
+                                                  "ovn-chassis-id");
+                        if (id) {
+                            sset_add(active_tunnels, id);
+                        }
+                    }
+                }
             }
         }
     }
@@ -112,7 +129,8 @@ add_local_datapath__(const struct ldatapath_index *ldatapaths,
                      const struct lport_index *lports,
                      const struct sbrec_datapath_binding *datapath,
                      bool has_local_l3gateway, int depth,
-                     struct hmap *local_datapaths)
+                     struct hmap *local_datapaths,
+                     bool has_local_chassisredirect)
 {
     uint32_t dp_key = datapath->tunnel_key;
 
@@ -120,6 +138,9 @@ add_local_datapath__(const struct ldatapath_index *ldatapaths,
     if (ld) {
         if (has_local_l3gateway) {
             ld->has_local_l3gateway = true;
+        }
+        if (has_local_chassisredirect) {
+            ld->has_local_chassisredirect = true;
         }
         return;
     }
@@ -131,6 +152,7 @@ add_local_datapath__(const struct ldatapath_index *ldatapaths,
     ovs_assert(ld->ldatapath);
     ld->localnet_port = NULL;
     ld->has_local_l3gateway = has_local_l3gateway;
+    ld->has_local_chassisredirect = has_local_chassisredirect;
 
     if (depth >= 100) {
         static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
@@ -148,7 +170,14 @@ add_local_datapath__(const struct ldatapath_index *ldatapaths,
                     lports, peer_name);
                 if (peer && peer->datapath) {
                     add_local_datapath__(ldatapaths, lports, peer->datapath,
-                                         false, depth + 1, local_datapaths);
+                                         false, depth + 1, local_datapaths,
+                                         false);
+                    ld->n_peer_dps++;
+                    ld->peer_dps = xrealloc(
+                            ld->peer_dps,
+                            ld->n_peer_dps * sizeof *ld->peer_dps);
+                    ld->peer_dps[ld->n_peer_dps - 1] = ldatapath_lookup_by_key(
+                        ldatapaths, peer->datapath->tunnel_key);
                 }
             }
         }
@@ -159,10 +188,11 @@ static void
 add_local_datapath(const struct ldatapath_index *ldatapaths,
                    const struct lport_index *lports,
                    const struct sbrec_datapath_binding *datapath,
-                   bool has_local_l3gateway, struct hmap *local_datapaths)
+                   bool has_local_l3gateway, struct hmap *local_datapaths,
+                   bool has_local_chassisredirect)
 {
     add_local_datapath__(ldatapaths, lports, datapath, has_local_l3gateway, 0,
-                         local_datapaths);
+                         local_datapaths, has_local_chassisredirect);
 }
 
 static void
@@ -359,15 +389,18 @@ static void
 consider_local_datapath(struct controller_ctx *ctx,
                         const struct ldatapath_index *ldatapaths,
                         const struct lport_index *lports,
+                        const struct chassis_index *chassis_index,
                         const struct sbrec_chassis *chassis_rec,
                         const struct sbrec_port_binding *binding_rec,
                         struct hmap *qos_map,
                         struct hmap *local_datapaths,
                         struct shash *lport_to_iface,
-                        struct sset *local_lports)
+                        struct sset *local_lports,
+                        struct sset *active_tunnels)
 {
     const struct ovsrec_interface *iface_rec
         = shash_find_data(lport_to_iface, binding_rec->logical_port);
+    struct ovs_list *gateway_chassis = NULL;
 
     bool our_chassis = false;
     if (iface_rec
@@ -378,7 +411,7 @@ consider_local_datapath(struct controller_ctx *ctx,
             sset_add(local_lports, binding_rec->logical_port);
         }
         add_local_datapath(ldatapaths, lports, binding_rec->datapath,
-                           false, local_datapaths);
+                           false, local_datapaths, false);
         if (iface_rec && qos_map && ctx->ovs_idl_txn) {
             get_qos_params(binding_rec, qos_map);
         }
@@ -393,26 +426,38 @@ consider_local_datapath(struct controller_ctx *ctx,
         if (our_chassis) {
             sset_add(local_lports, binding_rec->logical_port);
             add_local_datapath(ldatapaths, lports, binding_rec->datapath,
-                               false, local_datapaths);
+                               false, local_datapaths, false);
         }
     } else if (!strcmp(binding_rec->type, "chassisredirect")) {
-        if (gateway_chassis_in_pb_contains(binding_rec, chassis_rec)) {
+        gateway_chassis = gateway_chassis_get_ordered(binding_rec,
+                                                       chassis_index);
+        if (gateway_chassis &&
+            gateway_chassis_contains(gateway_chassis, chassis_rec)) {
+            struct gateway_chassis *gwc;
+            LIST_FOR_EACH (gwc, node, gateway_chassis) {
+                if (!gwc->db->chassis) {
+                    continue;
+                }
+                if (!strcmp(gwc->db->chassis->name, chassis_rec->name)) {
+                    /* sb_rec_port_binding->chassis should reflect master */
+                    our_chassis = true;
+                    break;
+                }
+                if (sset_contains(active_tunnels, gwc->db->chassis->name)) {
+                    break;
+                }
+            }
             add_local_datapath(ldatapaths, lports, binding_rec->datapath,
-                               false, local_datapaths);
-            /* XXX this should only be set to true if our chassis
-             * (chassis_rec) is the master for this chassisredirect port
-             * but for now we'll bind it only when not bound, this is
-             * handled in subsequent patches */
-            our_chassis = !binding_rec->chassis ||
-                chassis_rec == binding_rec->chassis;
+                               false, local_datapaths, our_chassis);
         }
+        gateway_chassis_destroy(gateway_chassis);
     } else if (!strcmp(binding_rec->type, "l3gateway")) {
         const char *chassis_id = smap_get(&binding_rec->options,
                                           "l3gateway-chassis");
         our_chassis = chassis_id && !strcmp(chassis_id, chassis_rec->name);
         if (our_chassis) {
             add_local_datapath(ldatapaths, lports, binding_rec->datapath,
-                               true, local_datapaths);
+                               true, local_datapaths, false);
         }
     } else if (!strcmp(binding_rec->type, "localnet")) {
         /* Add all localnet ports to local_lports so that we allocate ct zones
@@ -451,8 +496,9 @@ void
 binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
             const struct sbrec_chassis *chassis_rec,
             const struct ldatapath_index *ldatapaths,
-            const struct lport_index *lports, struct hmap *local_datapaths,
-            struct sset *local_lports)
+            const struct lport_index *lports,
+            const struct chassis_index *chassis_index,
+            struct hmap *local_datapaths, struct sset *local_lports)
 {
     if (!chassis_rec) {
         return;
@@ -461,26 +507,26 @@ binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
     const struct sbrec_port_binding *binding_rec;
     struct shash lport_to_iface = SHASH_INITIALIZER(&lport_to_iface);
     struct sset egress_ifaces = SSET_INITIALIZER(&egress_ifaces);
+    struct sset active_tunnels = SSET_INITIALIZER(&active_tunnels);
     struct hmap qos_map;
 
     hmap_init(&qos_map);
     if (br_int) {
         get_local_iface_ids(br_int, &lport_to_iface, local_lports,
-                            &egress_ifaces);
+                            &egress_ifaces, &active_tunnels);
     }
 
     /* Run through each binding record to see if it is resident on this
      * chassis and update the binding accordingly.  This includes both
      * directly connected logical ports and children of those ports. */
     SBREC_PORT_BINDING_FOR_EACH(binding_rec, ctx->ovnsb_idl) {
-        consider_local_datapath(ctx, ldatapaths, lports,
+        consider_local_datapath(ctx, ldatapaths, lports, chassis_index,
                                 chassis_rec, binding_rec,
                                 sset_is_empty(&egress_ifaces) ? NULL :
                                 &qos_map, local_datapaths, &lport_to_iface,
-                                local_lports);
+                                local_lports, &active_tunnels);
 
     }
-
     if (!sset_is_empty(&egress_ifaces)
         && set_noop_qos(ctx, &egress_ifaces)) {
         const char *entry;
@@ -491,7 +537,133 @@ binding_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
 
     shash_destroy(&lport_to_iface);
     sset_destroy(&egress_ifaces);
+    sset_destroy(&active_tunnels);
     hmap_destroy(&qos_map);
+}
+
+
+static void
+calculate_bfd_chassis(struct sset *bfd_chassis,
+                      const struct sbrec_chassis *our_chassis,
+                      struct hmap *local_datapaths,
+                      const struct chassis_index *chassis_index)
+{
+    /* Identify all chassis nodes to which we need to enable bfd.
+     * 1) Any chassis hosting the chassisredirect ports for known
+     *    router datapaths.
+     * 2) Chassis hosting peer datapaths (with ports) connected
+     *    to a router datapath  when our chassis is hosting a router
+     *    with a chassis redirect port. */
+    struct local_datapath *dp;
+    HMAP_FOR_EACH (dp, hmap_node, local_datapaths) {
+        const char *is_router = smap_get(&dp->datapath->external_ids,
+                                         "logical-router");
+        bool our_chassis_is_gw_for_dp = false;
+        if (is_router) {
+            for (size_t j = 0; j < dp->ldatapath->n_lports; j++) {
+                const struct sbrec_port_binding *pb = dp->ldatapath->lports[j];
+                if (!strcmp(pb->type, "chassisredirect")) {
+                    struct ovs_list *gateway_chassis = NULL;
+                    gateway_chassis =
+                        gateway_chassis_get_ordered(pb, chassis_index);
+                    /* we don't need BFD for non-HA  chassisredirect */
+                    if (!gateway_chassis ||
+                        ovs_list_is_short(gateway_chassis)) {
+                        continue;
+                    }
+                    our_chassis_is_gw_for_dp = gateway_chassis_contains(
+                            gateway_chassis, our_chassis);
+                    struct gateway_chassis *gwc;
+                    LIST_FOR_EACH (gwc, node, gateway_chassis) {
+                        if (gwc->db->chassis) {
+                            sset_add(bfd_chassis, gwc->db->chassis->name);
+                        }
+                    }
+                    gateway_chassis_destroy(gateway_chassis);
+                    break;
+                }
+            }
+        }
+        if (our_chassis_is_gw_for_dp) {
+            for (size_t i = 0; i < dp->n_peer_dps; i++) {
+                const struct ldatapath *pdp = dp->peer_dps[i];
+                if (!pdp) {
+                    continue;
+                }
+                for (size_t j = 0; j < pdp->n_lports; j++) {
+                    const struct sbrec_port_binding *pb = pdp->lports[j];
+                    if (pb->chassis) {
+                        /* Gateway node has to enable bfd to all nodes hosting
+                         * connected network ports */
+                        const char *chassis_name = pb->chassis->name;
+                        if (chassis_name) {
+                            sset_add(bfd_chassis, chassis_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void
+interface_set_bfd_(const struct ovsrec_interface *iface, bool bfd_setting)
+{
+    const char *new_setting = bfd_setting ? "true":"false";
+    const char *current_setting = smap_get(&iface->bfd, "enable");
+    if (current_setting && !strcmp(current_setting, new_setting)) {
+        /* If already set to true we skip setting it again
+         * to avoid flapping to bfd initialization state */
+        return;
+    }
+    const struct smap bfd = SMAP_CONST1(&bfd, "enable", new_setting);
+    ovsrec_interface_verify_bfd(iface);
+    ovsrec_interface_set_bfd(iface, &bfd);
+    VLOG_INFO("%s BFD on interface %s", bfd_setting?"Enabled":"Disabled",
+                                        iface->name);
+}
+
+void
+bfd_run(struct controller_ctx *ctx, const struct ovsrec_bridge *br_int,
+        const struct sbrec_chassis *chassis_rec,
+        struct hmap *local_datapaths,
+        const struct chassis_index *chassis_index)
+{
+    if (!chassis_rec) {
+        return;
+    }
+    struct sset bfd_chassis = SSET_INITIALIZER(&bfd_chassis);
+    /* Identify all chassis nodes to which we need to enable bfd */
+    calculate_bfd_chassis(&bfd_chassis, chassis_rec, local_datapaths,
+                          chassis_index);
+
+    /* Identify tunnels ports(connected to remote chassis id) to enable bfd */
+    struct sset tunnels = SSET_INITIALIZER(&tunnels);
+    struct sset bfd_ifaces = SSET_INITIALIZER(&bfd_ifaces);
+    for (size_t k = 0; k < br_int->n_ports; k++) {
+        const char *chassis_id = smap_get(&br_int->ports[k]->external_ids,
+                                          "ovn-chassis-id");
+        if (chassis_id) {
+            char *port_name = br_int->ports[k]->name;
+            sset_add(&tunnels, port_name);
+            if (sset_contains(&bfd_chassis, chassis_id)) {
+                sset_add(&bfd_ifaces, port_name);
+            }
+        }
+    }
+
+    /* Enable or disable bfd */
+    const struct ovsrec_interface *iface;
+    OVSREC_INTERFACE_FOR_EACH (iface, ctx->ovs_idl) {
+        if (sset_contains(&tunnels, iface->name)) {
+                interface_set_bfd_(
+                        iface, sset_contains(&bfd_ifaces, iface->name));
+         }
+    }
+
+    sset_destroy(&bfd_chassis);
+    sset_destroy(&tunnels);
+    sset_destroy(&bfd_ifaces);
 }
 
 /* Returns true if the database is all cleaned up, false if more work is
