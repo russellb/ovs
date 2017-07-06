@@ -7547,4 +7547,3 @@ AT_CHECK([ovn-sbctl --bare --columns gateway_chassis find port_binding logical_p
 AT_CHECK([ovn-sbctl --bare --columns options find port_binding logical_port="cr-alice" | grep 'redirect-chassis=gw1' | wc -l], [0], [1
 ])
 AT_CLEANUP
-
