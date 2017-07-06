@@ -1838,10 +1838,15 @@ tcp.flags = RST;
       </column>
 
       <column name="gateway_chassis">
-        The list of <ref table="Gateway_Chassis"/> should only be populated for
-        ports of type <code>chassisredirect</code>. And defines the list
-        of chassis which outgoing traffic of the port will be redirected
-        through.
+        <p>
+          A list of <ref table="Gateway_Chassis"/>.
+        </p>
+        <p>
+          This should only be populated for ports with
+          <ref column="type"/> set to <code>chassisredirect</code>.
+          This column defines the list of chassis used as gateways where traffic
+          will be redirected through.
+        </p>
       </column>
 
       <column name="tunnel_key">
@@ -2891,14 +2896,22 @@ tcp.flags = RST;
     </column>
   </table>
   <table name="Gateway_Chassis">
-    Association of Port_Binding of type <code>chassisredirect</code> to
-    a Chassis. The traffic going out through an specific chassisredirect
-    port will be redirected to a chassis, or a set of them in high
-    availability configurations.
+    <p>
+      Association of <ref table="Port_Binding"/> rows of
+      <ref table="Port_Binding" column="type"/> <code>chassisredirect</code> to
+      a <ref table="Chassis"/>. The traffic going out through a specific
+      <code>chassisredirect</code> port will be redirected to a chassis,
+      or a set of them in high availability configurations.
+    </p>
 
     <column name="name">
-      Name of the Gateway Chassis element, a recommendation
-      is using ${port_name}_${chassis_name}
+      <p>
+        Name of the <ref table="Gateway_Chassis"/>.
+      </p>
+      <p>
+        A suggested, but not required naming convention is
+        <code>${port_name}_${chassis_name}</code>.
+      </p>
     </column>
 
     <column name="chassis">
@@ -2907,7 +2920,7 @@ tcp.flags = RST;
 
     <column name="priority">
       This is the priority the specific <ref table="Chassis"/> among all
-      Gateway_Chassis belonging to the same logical router port.
+      Gateway_Chassis belonging to the same <ref table="Port_Binding"/>.
     </column>
 
     <column name="options">
